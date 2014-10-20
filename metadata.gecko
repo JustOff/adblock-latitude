@@ -1,8 +1,8 @@
 [general]
-id={d10d0bf8-f5b5-c8b4-a8b2-2b9879e08c5d}
+id={016acf6d-e5c0-4768-9376-3763d1ad1978}
 basename=adblockplus
-version=2.4.1
-author=Wladimir Palant
+version=3.0.0
+author=Binary Outcast
 options=chrome://adblockplus/content/ui/settings.xul
 optionsType=2
 
@@ -13,6 +13,7 @@ optionsType=2
 4=Fabrice Desré
 5=Hubird
 6=Günther Beyer (opoloo.de)
+7=Matt A. Tobin
 additional=chrome/content/ui/subscriptions.xml //subscription/@author
 
 [homepage]
@@ -29,11 +30,7 @@ zh-CN=https://adblockplus.org/zh_CN/
 zh-TW=https://adblockplus.org/zh_TW/
 
 [compat]
-firefox=16.0/26.0
-fennec2=16.0/26.0
-thunderbird=16.0/26.0
-seamonkey=2.13/2.23
-toolkit=16.0/26.0
+PaleMoon=25.0/30.*
 
 [preprocess]
 chrome/content/ui/firstRun.html =
