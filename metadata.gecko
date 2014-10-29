@@ -1,7 +1,8 @@
 [general]
 id={016acf6d-e5c0-4768-9376-3763d1ad1978}
 basename=adblockplus
-version=3.0.0
+realname=adblocklatitude
+version=3.0.0a1
 author=Binary Outcast
 options=chrome://adblockplus/content/ui/settings.xul
 optionsType=2
