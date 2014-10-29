@@ -35,13 +35,13 @@ def getBuildVersion(baseDir, metadata, releaseBuild, buildNum=None):
     if buildNum == None:
       buildNum = getBuildNum(baseDir)
     buildNum = str(buildNum)
-    if len(buildNum) > 0:
-      if re.search(r'(^|\.)\d+$', version):
-        # Numerical version number - need to fill up with zeros to have three
-        # version components.
-        while version.count('.') < 2:
-          version += '.0'
-      version += '.' + buildNum
+#    if len(buildNum) > 0:
+#      if re.search(r'(^|\.)\d+$', version):
+#        # Numerical version number - need to fill up with zeros to have three
+#        # version components.
+#        while version.count('.') < 2:
+#          version += '.0'
+#      version += '.' + buildNum
   return version
 
 def getTemplate(template, autoEscape=False):
