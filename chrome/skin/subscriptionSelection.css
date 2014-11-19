@@ -2,12 +2,12 @@
  * This file is part of Adblock Latitude,
  * Copyright (C) 2014 Binary Outcast.
  *
- * The Original Code is Adblock Plus
+ * The Original Code is AdBlock Plus
  * The Initial Developer of the Original Code is
  * Eyeo GmbH
  *
  * Portions created by the Initial Developer are 
- * Copyright (C) 2006-2014 the Initial Developer. All Rights Reserved.
+ * Copyright (C) 2006-2013 the Initial Developer. All Rights Reserved.
  *
  * Contributors:
  *
