@@ -1,4 +1,4 @@
-adblock-latitude
+Adblock Latitude
 ================
 
 Pale Moon ad blocker implementation
