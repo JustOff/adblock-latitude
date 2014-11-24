@@ -14,7 +14,7 @@ from chainedconfigparser import ChainedConfigParser
 import buildtools
 
 def getDefaultFileName(baseDir, metadata, version, ext):
-  return os.path.join(baseDir, '%s-%s.%s' % (metadata.get('general', 'basename'), version, ext))
+  return os.path.join(baseDir, '%s-%s.%s' % (metadata.get('general', 'realname'), version, ext))
 
 def getMetadataPath(baseDir, type):
   return os.path.join(baseDir, 'metadata.%s' % type)
