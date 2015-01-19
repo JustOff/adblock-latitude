@@ -32,4 +32,3 @@ pref("extensions.adblockplus.hideContributeButton", false);
 pref("extensions.adblockplus.blockableItemsSize", {width: 200, height: 200});
 pref("extensions.adblockplus.notificationurl", "");
 pref("extensions.adblockplus.notificationdata", {});
-pref("extensions.adblockplus.please_kill_startup_performance", false);
