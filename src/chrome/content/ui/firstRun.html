@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<!--
+  - This file is part of Adblock Plus <http://adblockplus.org/>,
+  - Copyright (C) 2006-2013 Eyeo GmbH
+  -
+  - Adblock Plus is free software: you can redistribute it and/or modify
+  - it under the terms of the GNU General Public License version 3 as
+  - published by the Free Software Foundation.
+  -
+  - Adblock Plus is distributed in the hope that it will be useful,
+  - but WITHOUT ANY WARRANTY; without even the implied warranty of
+  - MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  - GNU General Public License for more details.
+  -
+  - You should have received a copy of the GNU General Public License
+  - along with Adblock Plus.  If not, see <http://www.gnu.org/licenses/>.
+  -->
+
+<html>
+  <head>
+    <title class="i18n_firstRun_title"></title>
+    <meta charset="utf-8">
+    <link type="text/css" href="/skin/firstRun.css" rel="stylesheet"/>
+    <script type="text/javascript" src="utils.js"></script>
+    <script type="text/javascript" src="i18n.js"></script>
+    <script type="text/javascript" src="firstRun.js"></script>
+  </head>
+  <body>
+
+
+    <header>
+        <div id="logo"></div>
+        <h1 id="title-main" class="i18n_firstRun_title"></h1>
+    </header>
+	
+	<div style="padding-left: 25px; padding-right: 25px;">
+		<p><strong>If you are upgrading from the Pseudo-Static version of Adblock Plus, please be sure you restart your browser to clear ABP resources from memory.</strong></p>
+		<p><strong>If you are switching from the normal version of Adblock Plus or Adblock Edge please remove those add-ons as they will conflict with Adblock Latitude.</strong></p>
+		<p><strong>Please remember if you are switching from Adblock Edge (normal or Pseudo-Static) that you will have to reconfigure ABL to your former preferences. If you switched from Adblock Plus no action is required as to your settings.</strong></p>
+		<br />
+		<p><strong>Adblock Latitude 3.0.2</strong>
+		<ul>
+			<li>Revert ablity to have ABL fully loaded at start time due to a boostrap error</li>
+			<li>Update to 16x16 icon to improve readability - Mark II</li>
+		</ul>
+		<p><strong>Adblock Latitude 3.0.1</strong>
+		<ul>
+			<li>Update to deal with XBL binding whitelist</li>
+			<li>Update to 16x16 icon to improve readability</li>
+		</ul>
+	</div>
+
+    <section id="legacySafariWarning" class="i18n_firstRun_legacySafariWarning" hidden="true"></section>
+    <section id="dataCorruptionWarning" class="i18n_firstRun_dataCorruptionWarning" hidden="true"></section>
+
+    <footer>
+    </footer>
+
+
+    <div id="glass-pane">
+      <iframe id="share-popup" scrolling="no"></iframe>
+    </div>
+  </body>
+</html>

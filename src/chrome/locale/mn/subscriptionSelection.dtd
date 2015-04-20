@@ -1,0 +1,12 @@
+<!ENTITY addMain.label "&amp;Шүүх мэдээлэгч &quot;?1?&quot; нэмэх">
+<!ENTITY list.download.failed "Adblock Plus нь мэдээлэгчийн жагсаалтыг татаж чадсангүй.">
+<!ENTITY list.download.retry "Дахиж оролдох">
+<!ENTITY title.label "Мэдээлэ&amp;гчийн гарчиг:">
+<!ENTITY list.download.website "Вэбсайтыг харах">
+<!ENTITY viewList.label "Шүүлтүүрүүд харах">
+<!ENTITY visitHomepage.label "Үндсэн хуудсанд зочлох">
+<!ENTITY addSubscription.label "Мэдээлэгч нэмэх">
+<!ENTITY dialog.title "Adblock Plus-д тавтай морил">
+<!ENTITY location.label "Шүүлтүүрийн жагсаалтын &amp;байршил:">
+<!ENTITY supplementMessage "This filter subscription is meant to be used with the filter subscription &quot;?1?&quot; which you are not using yet.">
+<!ENTITY fromWeb.description "Please confirm that you want to add this filter subscription. You can change the subscription title or location before adding it.">
