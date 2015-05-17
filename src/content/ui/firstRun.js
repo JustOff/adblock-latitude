@@ -35,10 +35,6 @@
     var locale = require("utils").Utils.appLocale;
     document.documentElement.setAttribute("lang", locale);
 
-    // Set up URLs
-    var donateLink = E("donate");
-    donateLink.href = Utils.getDocLink("donate");
-
     var contributors = E("contributors");
     contributors.href = Utils.getDocLink("contributors");
 
