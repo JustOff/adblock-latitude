@@ -24,8 +24,8 @@ require("synchronizer");
 TimeLine.log("Done loading subscription synchronizer");
 require("notification");
 TimeLine.log("Done loading notification downloader");
-require("sync");
-TimeLine.log("Done loading sync support");
+/* require("sync");
+TimeLine.log("Done loading sync support"); */
 require("ui");
 TimeLine.log("Done loading UI integration code");
 TimeLine.leave("Started up");
