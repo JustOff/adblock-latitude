@@ -2,8 +2,9 @@
 <!ENTITY blocked.tooltip        "Blocked items on this page:">
 <!ENTITY filters.tooltip        "Most active filters:">
 
-<!ENTITY menuitem.label         "Ad&amp;block Plus Preferences">
+<!ENTITY menuitem.label         "Ad&amp;block Latitude Preferences">
 <!ENTITY toolbarbutton.label    "Adblock Latitude">
+<!ENTITY toolbarbutton2.label    "ABL">
 
 <!ENTITY context.image.label    "Adblock Latitude: Block image">
 <!ENTITY context.object.label   "Adblock Latitude: Block object">

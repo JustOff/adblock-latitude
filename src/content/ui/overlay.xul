@@ -91,7 +91,7 @@
   <statusbarpanel id="abp-status" class="statusbarpanel-iconic"
       context="abp-status-popup" tooltip="abp-tooltip"/>
 
-  <toolbarbutton id="abp-toolbarbutton" class="toolbarbutton-1" label="&toolbarbutton.label;"
+  <toolbarbutton id="abp-toolbarbutton" class="toolbarbutton-1" label="&toolbarbutton2.label;"
       tooltip="abp-tooltip" context="abp-status-popup"/>
 
   <!-- Tools menu -->
