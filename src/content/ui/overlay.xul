@@ -60,11 +60,9 @@
         <menuitem id="abp-status-frameobjects" label="&objecttabs.label;" type="checkbox" command="abp-command-toggleobjtabs"/>
         <menuitem id="abp-status-slowcollapse" label="&hideplaceholders.label;" type="checkbox" command="abp-command-togglecollapse"/>
         <menuitem id="abp-status-savestats" label="&counthits.label;" type="checkbox" command="abp-command-togglesavestats"/>
-        <menuitem id="abp-status-sync" label="&sync.label;" type="checkbox" command="abp-command-togglesync"/>
         <menuseparator id="abp-status-iconSettingsSeparator"/>
         <menuitem id="abp-status-showinaddonbar" label="&showinaddonbar.label;" type="checkbox" command="abp-command-toggleshowintoolbar"/>
         <menuitem id="abp-status-showintoolbar" label="&showintoolbar.label;" type="checkbox" command="abp-command-toggleshowintoolbar"/>
-        <menuitem id="abp-status-showinstatusbar" label="&showinstatusbar.label;" type="checkbox" command="abp-command-toggleshowinstatusbar"/>
       </menupopup>
     </menu>
   </menupopup>

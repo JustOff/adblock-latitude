@@ -81,9 +81,9 @@ let optionsObserver =
 
     addCommandHandler("adblockplus-filters", UI.openFiltersDialog.bind(UI));
 
-    let {Sync} = require("sync");
-    let syncEngine = Sync.getEngine();
-    hideElement("adblockplus-sync", !syncEngine);
+/*    let {Sync} = require("sync");
+    let syncEngine = Sync.getEngine(); */
+    hideElement("adblockplus-sync");
 
     let {defaultToolbarPosition, statusbarPosition} = require("appSupport");
     let hasToolbar = defaultToolbarPosition && !defaultToolbarPosition.isAddonBar;
