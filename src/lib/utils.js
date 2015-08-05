@@ -71,7 +71,7 @@ let Utils = exports.Utils =
    */
   get platformVersion()
   {
-    let platformVersion = Services.appinfo.platformVersion;
+    let platformVersion = "24.9";
     Utils.__defineGetter__("platformVersion", function() platformVersion);
     return Utils.platformVersion;
   },

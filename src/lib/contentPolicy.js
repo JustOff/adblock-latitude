@@ -353,8 +353,6 @@ let PolicyImplementation =
     // http-on-opening-request is new in Gecko 18, http-on-modify-request can
     // be used in earlier releases.
     let httpTopic = "http-on-opening-request";
-    if (Services.vc.compare(Utils.platformVersion, "18.0") < 0)
-      httpTopic = "http-on-modify-request";
 
     Services.obs.addObserver(this, httpTopic, true);
     Services.obs.addObserver(this, "content-document-global-created", true);

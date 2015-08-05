@@ -525,7 +525,7 @@ var SelectSubscription =
       list.selectedItem = Templater.getNodeForData(parent, "node", selectedNode) || parent.firstChild;
 
       // Show panel and focus list
-      let position = (Utils.versionComparator.compare(Utils.platformVersion, "2.0") < 0 ? "after_end" : "bottomcenter topleft");
+      let position = "bottomcenter topleft";
       panel.openPopup(E("selectSubscriptionButton"), position, 0, 0, false, false, event);
       Utils.runAsync(list.focus, list);
     };
