@@ -1868,11 +1868,11 @@ let UI = exports.UI =
     if (!button)
       return;
 
-    let notification = Notification.getNextToShow();
-    if (!notification)
+    let nextNotification = Notification.getNextToShow();
+    if (!nextNotification)
       return;
 
-    this._showNotification(window, button, notification);
+    this._showNotification(window, button, nextNotification);
   },
 
   _showNotification: function(window, button, notification)
