@@ -1,56 +1,7 @@
 content   adblockplus content/
 skin      adblockplus classic/1.0 skin/
 locale    adblockplus en-US locale/en-US/
-# locale    adblockplus ar locale/ar/
-# locale    adblockplus bg locale/bg/
-# locale    adblockplus ca locale/ca/
-# locale    adblockplus cs locale/cs/
-# locale    adblockplus da locale/da/
-# locale    adblockplus de locale/de/
-# locale    adblockplus dsb locale/dsb/
-# locale    adblockplus el locale/el/
-# locale    adblockplus en-GB locale/en-GB/
-# locale    adblockplus eo locale/eo/
-# locale    adblockplus es-AR locale/es-AR/
-# locale    adblockplus es-ES locale/es-ES/
-# locale    adblockplus es-MX locale/es-MX/
-# locale    adblockplus et locale/et/
-# locale    adblockplus fa locale/fa/
-# locale    adblockplus fi locale/fi/
-# locale    adblockplus fr locale/fr/
-# locale    adblockplus fy-NL locale/fy-NL/
-# locale    adblockplus gl locale/gl/
-# locale    adblockplus he locale/he/
-# locale    adblockplus hr locale/hr/
-# locale    adblockplus hsb locale/hsb/
-# locale    adblockplus hu locale/hu/
-# locale    adblockplus hy-AM locale/hy-AM/
-# locale    adblockplus is locale/is/
-# locale    adblockplus it locale/it/
-# locale    adblockplus ja locale/ja/
-# locale    adblockplus kk locale/kk/
-# locale    adblockplus ko locale/ko/
-# locale    adblockplus lt locale/lt/
-# locale    adblockplus lv locale/lv/
-# locale    adblockplus mn locale/mn/
-# locale    adblockplus ms locale/ms/
-# locale    adblockplus nl locale/nl/
-# locale    adblockplus pl locale/pl/
-# locale    adblockplus pt-BR locale/pt-BR/
-# locale    adblockplus pt-PT locale/pt-PT/
-# locale    adblockplus ro locale/ro/
-# locale    adblockplus ru locale/ru/
-# locale    adblockplus sk locale/sk/
-# locale    adblockplus sl locale/sl/
-# locale    adblockplus sq locale/sq/
-# locale    adblockplus sr locale/sr/
-# locale    adblockplus sv-SE locale/sv-SE/
-# locale    adblockplus th locale/th/
-# locale    adblockplus tr locale/tr/
-# locale    adblockplus uk locale/uk/
-# locale    adblockplus vi locale/vi/
-# locale    adblockplus zh-CN locale/zh-CN/
-# locale    adblockplus zh-TW locale/zh-TW/
+override  chrome://adblockplus/content/ui/filters-search.js chrome://adblockplus/content/ui/filters-search-pm26.js appversion<27.0.0
 
 # fennec settings
 override chrome://adblockplus/content/ui/settings.xul chrome://adblockplus/content/ui/fennecSettings.xul application={a23983c0-fd0e-11dc-95ff-0800200c9a66} application={aa3c5121-dab2-40e2-81ca-7ea25febc110}
