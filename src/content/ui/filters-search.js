@@ -4,6 +4,9 @@
 * file, You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
+
 /**
  * Implementation of the filter search functionality.
  * @class
@@ -15,9 +18,26 @@ var FilterSearch =
    */
   init: function()
   {
+    if (Services.vc.compare(Services.appinfo.version, "27.0.0") >= 0) {
+         let filters = E("filtersTree");
+         for (let prop in FilterSearch.fakeBrowser)
+           filters[prop] = FilterSearch.fakeBrowser[prop];
+         Object.defineProperty(filters, "_lastSearchString", {
+           get: function()
+           {
+             return this.finder.searchString;
+           },
+           enumerable: true,
+           configurable: true
+         });
+    }
     let findbar = E("findbar");
-    findbar.browser = FilterSearch.fakeBrowser;
-
+    if (Services.vc.compare(Services.appinfo.version, "27.0.0") >= 0) {
+        findbar.browser = filters;
+    }
+    else {
+        findbar.browser = FilterSearch.fakeBrowser;
+    }
     findbar.addEventListener("keypress", function(event)
     {
       // Work-around for bug 490047
@@ -121,60 +141,82 @@ var FilterSearch =
  * Fake browser implementation to make findbar widget happy - searches in
  * the filter list.
  */
-FilterSearch.fakeBrowser =
-{
-  fastFind:
-  {
-    searchString: null,
-    foundLink: null,
-    foundEditable: null,
-    caseSensitive: false,
-    get currentWindow() FilterSearch.fakeBrowser.contentWindow,
-
-    find: function(searchString, linksOnly)
+ if (Services.vc.compare(Services.appinfo.version, "27.0.0") < 0) {
+    FilterSearch.fakeBrowser =
     {
-      this.searchString = searchString;
-      return FilterSearch.search(this.searchString, 0, this.caseSensitive);
-    },
-
-    findAgain: function(findBackwards, linksOnly)
+     currentURI: Utils.makeURI("http://example.com/"),
+      contentWindow:
+      {
+        focus: function()
+        {
+          E("filtersTree").focus();
+        },
+        scrollByLines: function(num)
+        {
+          E("filtersTree").boxObject.scrollByLines(num);
+        },
+        scrollByPages: function(num)
+        {
+          E("filtersTree").boxObject.scrollByPages(num);
+        },
+      },
+    };
+ }
+ else {
+    FilterSearch.fakeBrowser =
     {
-      return FilterSearch.search(this.searchString, findBackwards ? -1 : 1, this.caseSensitive);
-    },
+      fastFind:
+      {
+        searchString: null,
+        foundLink: null,
+        foundEditable: null,
+        caseSensitive: false,
+        get currentWindow() FilterSearch.fakeBrowser.contentWindow,
 
-    // Irrelevant for us
-    init: function() {},
-    setDocShell: function() {},
-    setSelectionModeAndRepaint: function() {},
-    collapseSelection: function() {}
-  },
-  currentURI: Utils.makeURI("http://example.com/"),
-  contentWindow:
-  {
-    focus: function()
-    {
-      E("filtersTree").focus();
-    },
-    scrollByLines: function(num)
-    {
-      E("filtersTree").boxObject.scrollByLines(num);
-    },
-    scrollByPages: function(num)
-    {
-      E("filtersTree").boxObject.scrollByPages(num);
-    },
-  },
+        find: function(searchString, linksOnly)
+        {
+          this.searchString = searchString;
+          return FilterSearch.search(this.searchString, 0, this.caseSensitive);
+        },
 
-  addEventListener: function(event, handler, capture)
-  {
-    E("filtersTree").addEventListener(event, handler, capture);
-  },
-  removeEventListener: function(event, handler, capture)
-  {
-    E("filtersTree").addEventListener(event, handler, capture);
-  },
-};
+        findAgain: function(findBackwards, linksOnly)
+        {
+          return FilterSearch.search(this.searchString, findBackwards ? -1 : 1, this.caseSensitive);
+        },
 
+        // Irrelevant for us
+        init: function() {},
+        setDocShell: function() {},
+        setSelectionModeAndRepaint: function() {},
+        collapseSelection: function() {}
+      },
+      currentURI: Utils.makeURI("http://example.com/"),
+      contentWindow:
+      {
+        focus: function()
+        {
+          E("filtersTree").focus();
+        },
+        scrollByLines: function(num)
+        {
+          E("filtersTree").boxObject.scrollByLines(num);
+        },
+        scrollByPages: function(num)
+        {
+          E("filtersTree").boxObject.scrollByPages(num);
+        },
+      },
+
+      addEventListener: function(event, handler, capture)
+      {
+        E("filtersTree").addEventListener(event, handler, capture);
+      },
+      removeEventListener: function(event, handler, capture)
+      {
+        E("filtersTree").addEventListener(event, handler, capture);
+      },
+    };
+}
 window.addEventListener("load", function()
 {
   FilterSearch.init();
