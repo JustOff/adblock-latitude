@@ -1,11 +1,8 @@
 /*
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at http://mozilla.org/MPL/2.0/.
-*/
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
+ * This Source Code is subject to the terms of the Mozilla Public License
+ * version 2.0 (the "License"). You can obtain a copy of the License at
+ * http://mozilla.org/MPL/2.0/.
+ */
 
 /**
  * Implementation of the filter search functionality.
@@ -18,26 +15,21 @@ var FilterSearch =
    */
   init: function()
   {
-    if (Services.vc.compare(Services.appinfo.version, "27.0.0") >= 0) {
-         let filters = E("filtersTree");
-         for (let prop in FilterSearch.fakeBrowser)
-           filters[prop] = FilterSearch.fakeBrowser[prop];
-         Object.defineProperty(filters, "_lastSearchString", {
-           get: function()
-           {
-             return this.finder.searchString;
-           },
-           enumerable: true,
-           configurable: true
-         });
-    }
+    let filters = E("filtersTree");
+    for (let prop in FilterSearch.fakeBrowser)
+      filters[prop] = FilterSearch.fakeBrowser[prop];
+    Object.defineProperty(filters, "_lastSearchString", {
+      get: function()
+      {
+        return this.finder.searchString;
+      },
+      enumerable: true,
+      configurable: true
+    });
+
     let findbar = E("findbar");
-    if (Services.vc.compare(Services.appinfo.version, "27.0.0") >= 0) {
-        findbar.browser = filters;
-    }
-    else {
-        findbar.browser = FilterSearch.fakeBrowser;
-    }
+    findbar.browser = filters;
+
     findbar.addEventListener("keypress", function(event)
     {
       // Work-around for bug 490047
@@ -87,7 +79,7 @@ var FilterSearch =
     // Now go through the other subscriptions
     let result = Ci.nsITypeAheadFind.FIND_FOUND;
     let subscriptions = FilterStorage.subscriptions.slice();
-    subscriptions.sort(function(s1, s2) (s1 instanceof SpecialSubscription) - (s2 instanceof SpecialSubscription));
+    subscriptions.sort((s1, s2) => (s1 instanceof SpecialSubscription) - (s2 instanceof SpecialSubscription));
     let current = subscriptions.indexOf(FilterView.subscription);
     direction = direction || 1;
     for (let i = current + direction; ; i+= direction)
@@ -124,10 +116,10 @@ var FilterSearch =
           if (oldFocus)
           {
             oldFocus.focus();
-            Utils.runAsync(oldFocus.focus, oldFocus);
+            Utils.runAsync(() => oldFocus.focus());
           }
 
-          Utils.runAsync(findText, null, text, direction, direction == 1 ? -1 : subscription.filters.length);
+          Utils.runAsync(() => findText(text, direction, direction == 1 ? -1 :  subscription.filters.length));
           return result;
         }
       }
@@ -141,82 +133,130 @@ var FilterSearch =
  * Fake browser implementation to make findbar widget happy - searches in
  * the filter list.
  */
- if (Services.vc.compare(Services.appinfo.version, "27.0.0") < 0) {
-    FilterSearch.fakeBrowser =
+FilterSearch.fakeBrowser =
+{
+  finder:
+  {
+    _resultListeners: [],
+    searchString: null,
+    caseSensitive: false,
+    lastResult: null,
+
+    _notifyResultListeners: function(result, findBackwards)
     {
-     currentURI: Utils.makeURI("http://example.com/"),
-      contentWindow:
+      this.lastResult = result;
+      for (let listener of this._resultListeners)
       {
-        focus: function()
+        // See https://bugzilla.mozilla.org/show_bug.cgi?id=958101, starting
+        // with Gecko 29 only one parameter is expected.
+        try
         {
-          E("filtersTree").focus();
-        },
-        scrollByLines: function(num)
+          if (listener.onFindResult.length == 1)
+          {
+            listener.onFindResult({searchString: this.searchString,
+                result: result, findBackwards: findBackwards});
+          }
+          else
+            listener.onFindResult(result, findBackwards);
+        }
+        catch (e)
         {
-          E("filtersTree").boxObject.scrollByLines(num);
-        },
-        scrollByPages: function(num)
-        {
-          E("filtersTree").boxObject.scrollByPages(num);
-        },
-      },
-    };
- }
- else {
-    FilterSearch.fakeBrowser =
+          Cu.reportError(e);
+        }
+      }
+    },
+
+    fastFind: function(searchString, linksOnly, drawOutline)
     {
-      fastFind:
-      {
-        searchString: null,
-        foundLink: null,
-        foundEditable: null,
-        caseSensitive: false,
-        get currentWindow() FilterSearch.fakeBrowser.contentWindow,
+      this.searchString = searchString;
+      let result = FilterSearch.search(this.searchString, 0,
+                                       this.caseSensitive);
+      this._notifyResultListeners(result, false);
+    },
 
-        find: function(searchString, linksOnly)
-        {
-          this.searchString = searchString;
-          return FilterSearch.search(this.searchString, 0, this.caseSensitive);
-        },
+    findAgain: function(findBackwards, linksOnly, drawOutline)
+    {
+      let result = FilterSearch.search(this.searchString,
+                                       findBackwards ? -1 : 1,
+                                       this.caseSensitive);
+      this._notifyResultListeners(result, findBackwards);
+    },
 
-        findAgain: function(findBackwards, linksOnly)
-        {
-          return FilterSearch.search(this.searchString, findBackwards ? -1 : 1, this.caseSensitive);
-        },
+    addResultListener: function(listener)
+    {
+      if (this._resultListeners.indexOf(listener) === -1)
+        this._resultListeners.push(listener);
+    },
 
-        // Irrelevant for us
-        init: function() {},
-        setDocShell: function() {},
-        setSelectionModeAndRepaint: function() {},
-        collapseSelection: function() {}
-      },
-      currentURI: Utils.makeURI("http://example.com/"),
-      contentWindow:
-      {
-        focus: function()
-        {
-          E("filtersTree").focus();
-        },
-        scrollByLines: function(num)
-        {
-          E("filtersTree").boxObject.scrollByLines(num);
-        },
-        scrollByPages: function(num)
-        {
-          E("filtersTree").boxObject.scrollByPages(num);
-        },
-      },
+    removeResultListener: function(listener)
+    {
+      let index = this._resultListeners.indexOf(listener);
+      if (index !== -1)
+        this._resultListeners.splice(index, 1);
+    },
 
-      addEventListener: function(event, handler, capture)
-      {
-        E("filtersTree").addEventListener(event, handler, capture);
-      },
-      removeEventListener: function(event, handler, capture)
-      {
-        E("filtersTree").addEventListener(event, handler, capture);
-      },
-    };
-}
+    // Irrelevant for us
+    requestMatchesCount: function(searchString, matchLimit, linksOnly) {},
+    highlight: function(highlight, word) {},
+    enableSelection: function() {},
+    removeSelection: function() {},
+    focusContent: function() {},
+    keyPress: function() {}
+  },
+
+  currentURI: Utils.makeURI("http://example.com/"),
+  contentWindow:
+  {
+    focus: function()
+    {
+      E("filtersTree").focus();
+    },
+    scrollByLines: function(num)
+    {
+      E("filtersTree").boxObject.scrollByLines(num);
+    },
+    scrollByPages: function(num)
+    {
+      E("filtersTree").boxObject.scrollByPages(num);
+    },
+  },
+
+  messageManager:
+  {
+    _messageMap: {
+      "Findbar:Mouseup": "mouseup",
+      "Findbar:Keypress": "keypress"
+    },
+
+    _messageFromEvent: function(event)
+    {
+      for (let message in this._messageMap)
+        if (this._messageMap[message] == event.type)
+          return {target: event.currentTarget, name: message, data: event};
+      return null;
+    },
+
+    addMessageListener: function(message, listener)
+    {
+      if (!this._messageMap.hasOwnProperty(message))
+        return;
+
+      if (!("_ABPHandler" in listener))
+        listener._ABPHandler = (event) => listener.receiveMessage(this._messageFromEvent(event));
+
+      E("filtersTree").addEventListener(this._messageMap[message], listener._ABPHandler, false);
+    },
+
+    removeMessageListener: function(message, listener)
+    {
+      if (this._messageMap.hasOwnProperty(message) && listener._ABPHandler)
+        E("filtersTree").removeEventListener(this._messageMap[message], listener._ABPHandler, false);
+    },
+
+    sendAsyncMessage: function() {}
+  }
+};
+
 window.addEventListener("load", function()
 {
   FilterSearch.init();
