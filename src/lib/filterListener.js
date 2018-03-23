@@ -1,29 +1,24 @@
-/*
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at http://mozilla.org/MPL/2.0/.
-*/
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
  * @fileOverview Component synchronizing filter storage with Matcher instances and ElemHide.
  */
 
+"use strict";
+
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-let {TimeLine} = require("timeline");
 let {FilterStorage} = require("filterStorage");
 let {FilterNotifier} = require("filterNotifier");
 let {ElemHide} = require("elemHide");
+let {CSSRules} = require("cssRules");
 let {defaultMatcher} = require("matcher");
-let {ActiveFilter, RegExpFilter, ElemHideBase} = require("filterClasses");
+let {ActiveFilter, RegExpFilter, ElemHideBase, CSSPropertyFilter} =
+    require("filterClasses");
 let {Prefs} = require("prefs");
-
-/**
- * Value of the FilterListener.batchMode property.
- * @type Boolean
- */
-let batchMode = false;
 
 /**
  * Increases on filter changes, filters will be saved if it exceeds 1.
@@ -35,22 +30,8 @@ let isDirty = 0;
  * This object can be used to change properties of the filter change listeners.
  * @class
  */
-let FilterListener = exports.FilterListener =
+let FilterListener =
 {
-  /**
-   * Set to true when executing many changes, changes will only be fully applied after this variable is set to false again.
-   * @type Boolean
-   */
-  get batchMode()
-  {
-    return batchMode;
-  },
-  set batchMode(value)
-  {
-    batchMode = value;
-    flushElemHide();
-  },
-
   /**
    * Increases "dirty factor" of the filters and calls FilterStorage.saveToDisk()
    * if it becomes 1 or more. Save is executed delayed to prevent multiple
@@ -64,7 +45,10 @@ let FilterListener = exports.FilterListener =
     else
       isDirty += factor;
     if (isDirty >= 1)
+    {
+      isDirty = 0;
       FilterStorage.saveToDisk();
+    }
   }
 };
 
@@ -92,46 +76,37 @@ let HistoryPurgeObserver =
  */
 function init()
 {
-  TimeLine.enter("Entered filter listener initialization()");
+  FilterNotifier.on("filter.hitCount", onFilterHitCount);
+  FilterNotifier.on("filter.lastHit", onFilterLastHit);
+  FilterNotifier.on("filter.added", onFilterAdded);
+  FilterNotifier.on("filter.removed", onFilterRemoved);
+  FilterNotifier.on("filter.disabled", onFilterDisabled);
+  FilterNotifier.on("filter.moved", onGenericChange);
 
-  FilterNotifier.addListener(function(action, item, newValue, oldValue)
-  {
-    let match = /^(\w+)\.(.*)/.exec(action);
-    if (match && match[1] == "filter")
-      onFilterChange(match[2], item, newValue, oldValue);
-    else if (match && match[1] == "subscription")
-      onSubscriptionChange(match[2], item, newValue, oldValue);
-    else
-      onGenericChange(action, item);
-  });
+  FilterNotifier.on("subscription.added", onSubscriptionAdded);
+  FilterNotifier.on("subscription.removed", onSubscriptionRemoved);
+  FilterNotifier.on("subscription.disabled", onSubscriptionDisabled);
+  FilterNotifier.on("subscription.updated", onSubscriptionUpdated);
+  FilterNotifier.on("subscription.moved", onGenericChange);
+  FilterNotifier.on("subscription.title", onGenericChange);
+  FilterNotifier.on("subscription.fixedTitle", onGenericChange);
+  FilterNotifier.on("subscription.homepage", onGenericChange);
+  FilterNotifier.on("subscription.downloadStatus", onGenericChange);
+  FilterNotifier.on("subscription.lastCheck", onGenericChange);
+  FilterNotifier.on("subscription.errors", onGenericChange);
 
-  if ("nsIStyleSheetService" in Ci)
-    ElemHide.init();
-  else
-    flushElemHide = function() {};    // No global stylesheet in Chrome & Co.
+  FilterNotifier.on("load", onLoad);
+  FilterNotifier.on("save", onSave);
+
   FilterStorage.loadFromDisk();
-
-  TimeLine.log("done initializing data structures");
 
   Services.obs.addObserver(HistoryPurgeObserver, "browser:purge-session-history", true);
   onShutdown.add(function()
   {
     Services.obs.removeObserver(HistoryPurgeObserver, "browser:purge-session-history");
   });
-  TimeLine.log("done adding observers");
-
-  TimeLine.leave("Filter listener initialization done");
 }
 init();
-
-/**
- * Calls ElemHide.apply() if necessary.
- */
-function flushElemHide()
-{
-  if (!batchMode && ElemHide.isDirty)
-    ElemHide.apply();
-}
 
 /**
  * Notifies Matcher instances or ElemHide object about a new filter
@@ -153,7 +128,12 @@ function addFilter(filter)
   if (filter instanceof RegExpFilter)
     defaultMatcher.add(filter);
   else if (filter instanceof ElemHideBase)
-    ElemHide.add(filter);
+  {
+    if (filter instanceof CSSPropertyFilter)
+      CSSRules.add(filter);
+    else
+      ElemHide.add(filter);
+  }
 }
 
 /**
@@ -179,88 +159,137 @@ function removeFilter(filter)
   if (filter instanceof RegExpFilter)
     defaultMatcher.remove(filter);
   else if (filter instanceof ElemHideBase)
-    ElemHide.remove(filter);
+  {
+    if (filter instanceof CSSPropertyFilter)
+      CSSRules.remove(filter);
+    else
+      ElemHide.remove(filter);
+  }
 }
 
-/**
- * Subscription change listener
- */
-function onSubscriptionChange(action, subscription, newValue, oldValue)
+const primes = [101, 109, 131, 149, 163, 179, 193, 211, 229, 241];
+
+function addFilters(filters)
+{
+  // We add filters using pseudo-random ordering. Reason is that ElemHide will
+  // assign consecutive filter IDs that might be visible to the website. The
+  // randomization makes sure that no conclusion can be made about the actual
+  // filters applying there. We have ten prime numbers to use as iteration step,
+  // any of those can be chosen as long as the array length isn't divisible by
+  // it.
+  let len = filters.length;
+  if (!len)
+    return;
+
+  let current = (Math.random() * len) | 0;
+  let step;
+  do
+  {
+    step = primes[(Math.random() * primes.length) | 0];
+  } while (len % step == 0);
+
+  for (let i = 0; i < len; i++, current = (current + step) % len)
+    addFilter(filters[current]);
+}
+
+function onSubscriptionAdded(subscription)
 {
   FilterListener.setDirty(1);
 
-  if (action != "added" && action != "removed" && action != "disabled" && action != "updated")
-    return;
-
-  if (action != "removed" && !(subscription.url in FilterStorage.knownSubscriptions))
-  {
-    // Ignore updates for subscriptions not in the list
-    return;
-  }
-
-  if ((action == "added" || action == "removed" || action == "updated") && subscription.disabled)
-  {
-    // Ignore adding/removing/updating of disabled subscriptions
-    return;
-  }
-
-  if (action == "added" || action == "removed" || action == "disabled")
-  {
-    let method = (action == "added" || (action == "disabled" && newValue == false) ? addFilter : removeFilter);
-    if (subscription.filters)
-      subscription.filters.forEach(method);
-  }
-  else if (action == "updated")
-  {
-    subscription.oldFilters.forEach(removeFilter);
-    subscription.filters.forEach(addFilter);
-  }
-
-  flushElemHide();
+  if (!subscription.disabled)
+    addFilters(subscription.filters);
 }
 
-/**
- * Filter change listener
- */
-function onFilterChange(action, filter, newValue, oldValue)
+function onSubscriptionRemoved(subscription)
 {
-  if (action == "hitCount" || action == "lastHit")
-    FilterListener.setDirty(0.002);
-  else
-    FilterListener.setDirty(1);
+  FilterListener.setDirty(1);
 
-  if (action != "added" && action != "removed" && action != "disabled")
-    return;
+  if (!subscription.disabled)
+    subscription.filters.forEach(removeFilter);
+}
 
-  if ((action == "added" || action == "removed") && filter.disabled)
+function onSubscriptionDisabled(subscription, newValue)
+{
+  FilterListener.setDirty(1);
+
+  if (subscription.url in FilterStorage.knownSubscriptions)
   {
-    // Ignore adding/removing of disabled filters
-    return;
+    if (newValue == false)
+      addFilters(subscription.filters);
+    else
+      subscription.filters.forEach(removeFilter);
   }
+}
 
-  if (action == "added" || (action == "disabled" && newValue == false))
+function onSubscriptionUpdated(subscription)
+{
+  FilterListener.setDirty(1);
+
+  if (subscription.url in FilterStorage.knownSubscriptions &&
+      !subscription.disabled)
+  {
+    subscription.oldFilters.forEach(removeFilter);
+    addFilters(subscription.filters);
+  }
+}
+
+function onFilterHitCount(filter, newValue)
+{
+  if (newValue == 0)
+    FilterListener.setDirty(0);
+  else
+    FilterListener.setDirty(0.002);
+}
+
+function onFilterLastHit()
+{
+  FilterListener.setDirty(0.002);
+}
+
+function onFilterAdded(filter)
+{
+  FilterListener.setDirty(1);
+
+  if (!filter.disabled)
+    addFilter(filter);
+}
+
+function onFilterRemoved(filter)
+{
+  FilterListener.setDirty(1);
+
+  if (!filter.disabled)
+    removeFilter(filter);
+}
+
+function onFilterDisabled(filter, newValue)
+{
+  FilterListener.setDirty(1);
+
+  if (newValue == false)
     addFilter(filter);
   else
     removeFilter(filter);
-  flushElemHide();
 }
 
-/**
- * Generic notification listener
- */
-function onGenericChange(action)
+function onGenericChange()
 {
-  if (action == "load")
-  {
-    isDirty = 0;
+  FilterListener.setDirty(1);
+}
 
-    defaultMatcher.clear();
-    ElemHide.clear();
-    for each (let subscription in FilterStorage.subscriptions)
-      if (!subscription.disabled)
-        subscription.filters.forEach(addFilter);
-    flushElemHide();
-  }
-  else if (action == "save")
-    isDirty = 0;
+function onLoad()
+{
+  isDirty = 0;
+
+  defaultMatcher.clear();
+  ElemHide.clear();
+  CSSRules.clear();
+  for (let subscription of FilterStorage.subscriptions)
+    if (!subscription.disabled)
+      addFilters(subscription.filters);
+}
+
+function onSave()
+{
+  isDirty = 0;
 }

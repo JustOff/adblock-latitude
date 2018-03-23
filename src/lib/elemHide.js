@@ -1,108 +1,107 @@
-/*
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at http://mozilla.org/MPL/2.0/.
-*/
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
  * @fileOverview Element hiding implementation.
  */
 
-Cu.import("resource://gre/modules/Services.jsm");
-
 let {Utils} = require("utils");
-let {IO} = require("io");
-let {Prefs} = require("prefs");
 let {ElemHideException} = require("filterClasses");
 let {FilterNotifier} = require("filterNotifier");
-let {AboutHandler} = require("elemHideHitRegistration");
-let {TimeLine} = require("timeline");
 
 /**
  * Lookup table, filters by their associated key
  * @type Object
  */
-let filterByKey = {__proto__: null};
+var filterByKey = [];
 
 /**
  * Lookup table, keys of the filters by filter text
  * @type Object
  */
-let keyByFilter = {__proto__: null};
+var keyByFilter = Object.create(null);
+
+/**
+ * Nested lookup table, filter (or false if inactive) by filter key by domain.
+ * (Only contains filters that aren't unconditionally matched for all domains.)
+ * @type Object
+ */
+var filtersByDomain = Object.create(null);
+
+/**
+ * Lookup table, filter key by selector. (Only used for selectors that are
+ * unconditionally matched for all domains.)
+ */
+var filterKeyBySelector = Object.create(null);
+
+/**
+ * This array caches the keys of filterKeyBySelector table (selectors which
+ * unconditionally apply on all domains). It will be null if the cache needs to
+ * be rebuilt.
+ */
+var unconditionalSelectors = null;
+
+/**
+ * This array caches the values of filterKeyBySelector table (filterIds for
+ * selectors which unconditionally apply on all domains). It will be null if the
+ * cache needs to be rebuilt.
+ */
+var unconditionalFilterKeys = null;
+
+/**
+ * Object to be used instead when a filter has a blank domains property.
+ */
+var defaultDomains = Object.create(null);
+defaultDomains[""] = true;
 
 /**
  * Lookup table, keys are known element hiding exceptions
  * @type Object
  */
-let knownExceptions = {__proto__: null};
+var knownExceptions = Object.create(null);
 
 /**
  * Lookup table, lists of element hiding exceptions by selector
  * @type Object
  */
-let exceptions = {__proto__: null};
+var exceptions = Object.create(null);
 
 /**
- * Currently applied stylesheet URL
- * @type nsIURI
- */
-let styleURL = null;
-
-/**
- * Element hiding component
+ * Container for element hiding filters
  * @class
  */
-let ElemHide = exports.ElemHide =
+var ElemHide = exports.ElemHide =
 {
-  /**
-   * Indicates whether filters have been added or removed since the last apply() call.
-   * @type Boolean
-   */
-  isDirty: false,
-
-  /**
-   * Inidicates whether the element hiding stylesheet is currently applied.
-   * @type Boolean
-   */
-  applied: false,
-
-  /**
-   * Called on module startup.
-   */
-  init: function()
-  {
-    TimeLine.enter("Entered ElemHide.init()");
-    Prefs.addListener(function(name)
-    {
-      if (name == "enabled")
-        ElemHide.apply();
-    });
-    onShutdown.add(function()
-    {
-      ElemHide.unapply();
-    });
-
-    TimeLine.log("done adding prefs listener");
-
-    let styleFile = IO.resolveFilePath(Prefs.data_directory);
-    styleFile.append("elemhide.css");
-    styleURL = Services.io.newFileURI(styleFile).QueryInterface(Ci.nsIFileURL);
-    TimeLine.log("done determining stylesheet URL");
-
-    TimeLine.leave("ElemHide.init() done");
-  },
-
   /**
    * Removes all known filters
    */
   clear: function()
   {
-    filterByKey = {__proto__: null};
-    keyByFilter = {__proto__: null};
-    knownExceptions = {__proto__: null};
-    exceptions = {__proto__: null};
-    ElemHide.isDirty = false;
-    ElemHide.unapply();
+    filterByKey = [];
+    keyByFilter = Object.create(null);
+    filtersByDomain = Object.create(null);
+    filterKeyBySelector = Object.create(null);
+    unconditionalSelectors = unconditionalFilterKeys = null;
+    knownExceptions = Object.create(null);
+    exceptions = Object.create(null);
+    FilterNotifier.emit("elemhideupdate");
+  },
+
+  _addToFiltersByDomain: function(key, filter)
+  {
+    let domains = filter.domains || defaultDomains;
+    for (let domain in domains)
+    {
+      let filters = filtersByDomain[domain];
+      if (!filters)
+        filters = filtersByDomain[domain] = Object.create(null);
+
+      if (domains[domain])
+        filters[key] = filter;
+      else
+        filters[key] = false;
+    }
   },
 
   /**
@@ -120,6 +119,18 @@ let ElemHide = exports.ElemHide =
       if (!(selector in exceptions))
         exceptions[selector] = [];
       exceptions[selector].push(filter);
+
+      // If this is the first exception for a previously unconditionally
+      // applied element hiding selector we need to take care to update the
+      // lookups.
+      let filterKey = filterKeyBySelector[selector];
+      if (typeof filterKey != "undefined")
+      {
+        this._addToFiltersByDomain(filterKey, filterByKey[filterKey]);
+        delete filterKeyBySelector[selector];
+        unconditionalSelectors = unconditionalFilterKeys = null;
+      }
+
       knownExceptions[filter.text] = true;
     }
     else
@@ -127,14 +138,42 @@ let ElemHide = exports.ElemHide =
       if (filter.text in keyByFilter)
         return;
 
-      let key;
-      do {
-        key = Math.random().toFixed(15).substr(5);
-      } while (key in filterByKey);
-
-      filterByKey[key] = filter;
+      let key = filterByKey.push(filter) - 1;
       keyByFilter[filter.text] = key;
-      ElemHide.isDirty = true;
+
+      if (!(filter.domains || filter.selector in exceptions))
+      {
+        // The new filter's selector is unconditionally applied to all domains
+        filterKeyBySelector[filter.selector] = key;
+        unconditionalSelectors = unconditionalFilterKeys = null;
+      }
+      else
+      {
+        // The new filter's selector only applies to some domains
+        this._addToFiltersByDomain(key, filter);
+      }
+    }
+
+    FilterNotifier.emit("elemhideupdate");
+  },
+
+  _removeFilterKey: function(key, filter)
+  {
+    if (filterKeyBySelector[filter.selector] == key)
+    {
+      delete filterKeyBySelector[filter.selector];
+      unconditionalSelectors = unconditionalFilterKeys = null;
+      return;
+    }
+
+    // We haven't found this filter in unconditional filters, look in
+    // filtersByDomain.
+    let domains = filter.domains || defaultDomains;
+    for (let domain in domains)
+    {
+      let filters = filtersByDomain[domain];
+      if (filters)
+        delete filters[key];
     }
   },
 
@@ -163,8 +202,10 @@ let ElemHide = exports.ElemHide =
       let key = keyByFilter[filter.text];
       delete filterByKey[key];
       delete keyByFilter[filter.text];
-      ElemHide.isDirty = true;
+      this._removeFilterKey(key, filter);
     }
+
+    FilterNotifier.emit("elemhideupdate");
   },
 
   /**
@@ -173,7 +214,6 @@ let ElemHide = exports.ElemHide =
    */
   getException: function(/**Filter*/ filter, /**String*/ docDomain) /**ElemHideException*/
   {
-    let selector = filter.selector;
     if (!(filter.selector in exceptions))
       return null;
 
@@ -186,207 +226,153 @@ let ElemHide = exports.ElemHide =
   },
 
   /**
-   * Will be set to true if apply() is running (reentrance protection).
-   * @type Boolean
-   */
-  _applying: false,
-
-  /**
-   * Will be set to true if an apply() call arrives while apply() is already
-   * running (delayed execution).
-   * @type Boolean
-   */
-  _needsApply: false,
-
-  /**
-   * Generates stylesheet URL and applies it globally
-   */
-  apply: function()
-  {
-    if (this._applying)
-    {
-      this._needsApply = true;
-      return;
-    }
-
-    TimeLine.enter("Entered ElemHide.apply()");
-
-    if (!ElemHide.isDirty || !Prefs.enabled)
-    {
-      // Nothing changed, looks like we merely got enabled/disabled
-      if (Prefs.enabled && !ElemHide.applied)
-      {
-        try
-        {
-          Utils.styleService.loadAndRegisterSheet(styleURL, Ci.nsIStyleSheetService.USER_SHEET);
-          ElemHide.applied = true;
-        }
-        catch (e)
-        {
-          Cu.reportError(e);
-        }
-        TimeLine.log("Applying existing stylesheet finished");
-      }
-      else if (!Prefs.enabled && ElemHide.applied)
-      {
-        ElemHide.unapply();
-        TimeLine.log("ElemHide.unapply() finished");
-      }
-
-      TimeLine.leave("ElemHide.apply() done (no file changes)");
-      return;
-    }
-
-    IO.writeToFile(styleURL.file, false, this._generateCSSContent(), function(e)
-    {
-      TimeLine.enter("ElemHide.apply() write callback");
-      this._applying = false;
-
-      if (e && e.result == Cr.NS_ERROR_NOT_AVAILABLE)
-        IO.removeFile(styleURL.file, function(e2) {});
-      else if (e)
-        Cu.reportError(e);
-
-      if (this._needsApply)
-      {
-        this._needsApply = false;
-        this.apply();
-      }
-      else if (!e || e.result == Cr.NS_ERROR_NOT_AVAILABLE)
-      {
-        ElemHide.isDirty = false;
-
-        ElemHide.unapply();
-        TimeLine.log("ElemHide.unapply() finished");
-
-        if (!e)
-        {
-          try
-          {
-            Utils.styleService.loadAndRegisterSheet(styleURL, Ci.nsIStyleSheetService.USER_SHEET);
-            ElemHide.applied = true;
-          }
-          catch (e)
-          {
-            Cu.reportError(e);
-          }
-          TimeLine.log("Applying stylesheet finished");
-        }
-
-        FilterNotifier.triggerListeners("elemhideupdate");
-      }
-      TimeLine.leave("ElemHide.apply() write callback done");
-    }.bind(this), "ElemHideWrite");
-
-    this._applying = true;
-
-    TimeLine.leave("ElemHide.apply() done", "ElemHideWrite");
-  },
-
-  _generateCSSContent: function()
-  {
-    // Grouping selectors by domains
-    TimeLine.log("start grouping selectors");
-    let domains = {__proto__: null};
-    let hasFilters = false;
-    for (let key in filterByKey)
-    {
-      let filter = filterByKey[key];
-      let domain = filter.selectorDomain || "";
-
-      let list;
-      if (domain in domains)
-        list = domains[domain];
-      else
-      {
-        list = {__proto__: null};
-        domains[domain] = list;
-      }
-      list[filter.selector] = key;
-      hasFilters = true;
-    }
-    TimeLine.log("done grouping selectors");
-
-    if (!hasFilters)
-      throw Cr.NS_ERROR_NOT_AVAILABLE;
-
-    function escapeChar(match)
-    {
-      return "\\" + match.charCodeAt(0).toString(16) + " ";
-    }
-
-    // Return CSS data
-    let cssTemplate = "-moz-binding: url(about:" + AboutHandler.aboutPrefix + "?%ID%#dummy) !important;";
-    for (let domain in domains)
-    {
-      let rules = [];
-      let list = domains[domain];
-
-      if (domain)
-        yield ('@-moz-document domain("' + domain.split(",").join('"),domain("') + '"){').replace(/[^\x01-\x7F]/g, escapeChar);
-      else
-      {
-        // Only allow unqualified rules on a few protocols to prevent them from blocking chrome
-        yield '@-moz-document url-prefix("http://"),url-prefix("https://"),'
-                  + 'url-prefix("mailbox://"),url-prefix("imap://"),'
-                  + 'url-prefix("news://"),url-prefix("snews://"){';
-      }
-
-      for (let selector in list)
-        yield selector.replace(/[^\x01-\x7F]/g, escapeChar) + "{" + cssTemplate.replace("%ID%", list[selector]) + "}";
-      yield '}';
-    }
-  },
-
-  /**
-   * Unapplies current stylesheet URL
-   */
-  unapply: function()
-  {
-    if (ElemHide.applied)
-    {
-      try
-      {
-        Utils.styleService.unregisterSheet(styleURL, Ci.nsIStyleSheetService.USER_SHEET);
-      }
-      catch (e)
-      {
-        Cu.reportError(e);
-      }
-      ElemHide.applied = false;
-    }
-  },
-
-  /**
-   * Retrieves the currently applied stylesheet URL
-   * @type String
-   */
-  get styleURL() ElemHide.applied ? styleURL.spec : null,
-
-  /**
    * Retrieves an element hiding filter by the corresponding protocol key
    */
-  getFilterByKey: function(/**String*/ key) /**Filter*/
+  getFilterByKey: function(/**Number*/ key) /**Filter*/
   {
     return (key in filterByKey ? filterByKey[key] : null);
   },
 
   /**
-   * Returns a list of all selectors active on a particular domain (currently
-   * used only in Chrome).
+   * Returns a list of all selectors as a nested map. On first level, the keys
+   * are all values of `ElemHideBase.selectorDomain` (domains on which these
+   * selectors should apply, ignoring exceptions). The values are maps again,
+   * with the keys being selectors and values the corresponding filter keys.
+   * @returns {Map.<String,Map<String,String>>}
    */
-  getSelectorsForDomain: function(/**String*/ domain, /**Boolean*/ specificOnly)
+  getSelectors: function()
   {
-    let result = [];
+    let domains = new Map();
     for (let key in filterByKey)
     {
       let filter = filterByKey[key];
-      if (specificOnly && (!filter.domains || filter.domains[""]))
+      let selector = filter.selector;
+      if (!selector)
         continue;
 
-      if (filter.isActiveOnDomain(domain) && !this.getException(filter, domain))
-        result.push(filter.selector);
+      let domain = filter.selectorDomain || "";
+
+      if (!domains.has(domain))
+        domains.set(domain, new Map());
+      domains.get(domain).set(selector, key);
     }
-    return result;
+
+    return domains;
+  },
+
+  /**
+   * Returns a list of selectors that apply on each website unconditionally.
+   * @returns {String[]}
+   */
+  getUnconditionalSelectors: function()
+  {
+    if (!unconditionalSelectors)
+      unconditionalSelectors = Object.keys(filterKeyBySelector);
+    return unconditionalSelectors.slice();
+  },
+
+  /**
+   * Returns a list of filter keys for selectors which apply to all websites
+   * without exception.
+   * @returns {Number[]}
+   */
+  getUnconditionalFilterKeys: function()
+  {
+    if (!unconditionalFilterKeys)
+    {
+      let selectors = this.getUnconditionalSelectors();
+      unconditionalFilterKeys = [];
+      for (let selector of selectors)
+        unconditionalFilterKeys.push(filterKeyBySelector[selector]);
+    }
+    return unconditionalFilterKeys.slice();
+  },
+
+
+  /**
+   * Constant used by getSelectorsForDomain to return all selectors applying to
+   * a particular hostname.
+   */
+  ALL_MATCHING: 0,
+
+  /**
+   * Constant used by getSelectorsForDomain to exclude selectors which apply to
+   * all websites without exception.
+   */
+  NO_UNCONDITIONAL: 1,
+
+  /**
+   * Constant used by getSelectorsForDomain to return only selectors for filters
+   * which specifically match the given host name.
+   */
+  SPECIFIC_ONLY: 2,
+
+  /**
+   * Determines from the current filter list which selectors should be applied
+   * on a particular host name. Optionally returns the corresponding filter
+   * keys.
+   * @param {String} domain
+   * @param {Number} [criteria]
+   *   One of the following: ElemHide.ALL_MATCHING, ElemHide.NO_UNCONDITIONAL or
+   *                         ElemHide.SPECIFIC_ONLY.
+   * @param {Boolean} [provideFilterKeys]
+   *   If true, the function will return a list of corresponding filter keys in
+   *   addition to selectors.
+   * @returns {string[]|Array.<string[]>}
+   *   List of selectors or an array with two elements (list of selectors and
+   *   list of corresponding keys) if provideFilterKeys is true.
+   */
+  getSelectorsForDomain: function(domain, criteria, provideFilterKeys)
+  {
+    let filterKeys = [];
+    let selectors = [];
+
+    if (typeof criteria == "undefined")
+      criteria = ElemHide.ALL_MATCHING;
+    if (criteria < ElemHide.NO_UNCONDITIONAL)
+    {
+      selectors = this.getUnconditionalSelectors();
+      if (provideFilterKeys)
+        filterKeys = this.getUnconditionalFilterKeys();
+    }
+
+    let specificOnly = (criteria >= ElemHide.SPECIFIC_ONLY);
+    let seenFilters = Object.create(null);
+    let currentDomain = domain ? domain.toUpperCase() : "";
+    while (true)
+    {
+      if (specificOnly && currentDomain == "")
+        break;
+
+      let filters = filtersByDomain[currentDomain];
+      if (filters)
+      {
+        for (let filterKey in filters)
+        {
+          if (filterKey in seenFilters)
+            continue;
+          seenFilters[filterKey] = true;
+
+          let filter = filters[filterKey];
+          if (filter && !this.getException(filter, domain))
+          {
+            selectors.push(filter.selector);
+            // It is faster to always push the key, even if not required.
+            filterKeys.push(filterKey);
+          }
+        }
+      }
+
+      if (currentDomain == "")
+        break;
+
+      let nextDot = currentDomain.indexOf(".");
+      currentDomain = nextDot == -1 ? "" : currentDomain.substr(nextDot + 1);
+    }
+
+    if (provideFilterKeys)
+      return [selectors, filterKeys];
+    else
+      return selectors;
   }
 };

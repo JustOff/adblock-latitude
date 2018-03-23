@@ -1,8 +1,6 @@
-/*
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at http://mozilla.org/MPL/2.0/.
-*/
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
  * @fileOverview Various application-specific functions.
@@ -10,13 +8,14 @@
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/AddonManager.jsm");
 
 /**
  * Checks whether an application window is known and should get Adblock Plus
  * user interface elements.
  * @result Boolean
  */
-exports.isKnownWindow = function isKnownWindow(/**Window*/ window) false;
+exports.isKnownWindow = (/**Window*/ window) => false;
 
 /**
  * HACK: In some applications the window finishes initialization during load
@@ -55,9 +54,8 @@ exports.getCurrentLocation = function getCurrentLocation(/**Window*/ window) /**
 exports.contentContextMenu = null;
 
 /**
- * The properties parent, before, after determine the default placement of the
- * toolbar icon, the property isAddonBar indicates that it is an add-on bar
- * (different options text is displayed then).
+ * Determines the default placement of the toolbar icon via object properties
+ * parent, before and after.
  * @type Object
  */
 exports.defaultToolbarPosition = null;
@@ -201,64 +199,22 @@ exports.removeBrowserLocationListeners = function removeBrowserLocationListeners
   progressListeners.delete(window);
 };
 
-/**
- * Maps windows to a list of click listeners.
- */
-let clickListeners = new WeakMap();
-
-/**
- * Makes sure that a function is called whenever the user clicks inside the
- * browser's content area.
- */
-exports.addBrowserClickListener = function addBrowserClickListener(/**Window*/ window, /**Function*/ callback)
-{
-  let browser = (exports.getBrowser ? exports.getBrowser(window) : null);
-  if (browser)
-  {
-    browser.addEventListener("click", callback, true);
-
-    if (clickListeners.has(window))
-      clickListeners.get(window).push(callback);
-    else
-      clickListeners.set(window, [callback]);
-  }
-};
-
-/**
- * Removes all click listeners registered for a window, to be called on
- * cleanup.
- */
-exports.removeBrowserClickListeners = function removeBrowserClickListeners(/**Window*/ window)
-{
-  if (!clickListeners.has(window))
-    return;
-
-  let browser = (exports.getBrowser ? exports.getBrowser(window) : null);
-  if (browser)
-  {
-    let listeners = clickListeners.get(window);
-    for (let i = 0; i < listeners.length; i++)
-      browser.removeEventListener("click", listeners[i], true);
-  }
-  clickListeners.delete(window);
-};
-
 let {application} = require("info");
 switch (application)
 {
-  case "PaleMoon":
+  case "firefox":
   {
     exports.isKnownWindow = function ff_isKnownWindow(window)
     {
       return (window.document.documentElement.getAttribute("windowtype") == "navigator:browser");
     };
 
-    exports.getBrowser = function ff_getBrowser(window) window.gBrowser;
+    exports.getBrowser = (window) => window.gBrowser;
 
     exports.addTab = function ff_addTab(window, url, event)
     {
       if (event)
-        window.openNewTabWith(url, exports.getBrowser(window).contentDocument, null, event, false);
+        window.openNewTabWith(url, null, null, event, false);
       else
         window.gBrowser.loadOneTab(url, {inBackground: false});
     };
@@ -266,9 +222,7 @@ switch (application)
     exports.contentContextMenu = "contentAreaContextMenu";
 
     exports.defaultToolbarPosition = {
-      parent: "addon-bar",
-      before: "addonbar-closebutton",
-      isAddonBar: true
+      parent: "nav-bar"
     };
 
     exports.toolsMenu = {
@@ -308,7 +262,7 @@ switch (application)
     exports.addTab = function sm_addTab(window, url, event)
     {
       if (event || !("gBrowser" in window))
-        window.openNewTabWith(url, ("gBrowser" in window ? window.gBrowser.contentDocument : null), null, event, false);
+        window.openNewTabWith(url, null, null, event, false);
       else
         window.gBrowser.loadOneTab(url, {inBackground: false});
     };
@@ -351,6 +305,14 @@ switch (application)
       }
     };
 
+    // for Seamonkey we have to ignore same document flag because of
+    // bug #1035171 (https://bugzilla.mozilla.org/show_bug.cgi?id=1035171)
+    let origAddBrowserLocationListener = exports.addBrowserLocationListener;
+    exports.addBrowserLocationListener = function sm_addBrowserLocationListener(window, callback, ignoreSameDoc)
+    {
+      origAddBrowserLocationListener(window, callback, false);
+    };
+
     exports.contentContextMenu = ["contentAreaContextMenu", "mailContext"];
 
     exports.defaultToolbarPosition = {
@@ -387,7 +349,7 @@ switch (application)
 
     exports.delayInitialization = true;
 
-    exports.getBrowser = function tb_getBrowser(window) window.getBrowser();
+    exports.getBrowser = (window) => window.getBrowser();
 
     exports.addTab = function tb_addTab(window, url, event)
     {
@@ -600,40 +562,6 @@ switch (application)
       progressListeners.delete(window);
     };
 
-    exports.addBrowserClickListener = function addBrowserClickListener(/**Window*/ window, /**Function*/ callback)
-    {
-      if (clickListeners.has(window))
-      {
-        clickListeners.get(window).callbacks.push(callback);
-        return;
-      }
-
-      let callbacks = [callback];
-      let listener = new BrowserChangeListener(window, function(oldBrowser, newBrowser)
-      {
-        if (oldBrowser)
-          for (let i = 0; i < callbacks.length; i++)
-            oldBrowser.removeEventListener("click", callbacks[i], true);
-        if (newBrowser)
-          for (let i = 0; i < callbacks.length; i++)
-            newBrowser.addEventListener("click", callbacks[i], true);
-      });
-      listener.callbacks = callbacks;
-
-      clickListeners.set(window, listener);
-    };
-
-    exports.removeBrowserClickListeners = function removeBrowserClickListeners(/**Window*/ window)
-    {
-      if (!clickListeners.has(window))
-        return;
-
-      let listener = clickListeners.get(window);
-      listener.detach();
-
-      clickListeners.delete(window);
-    };
-
     // Make sure to close/reopen list of blockable items when the user changes tabs
     let {WindowObserver} = require("windowObserver");
     new WindowObserver({
@@ -673,19 +601,24 @@ switch (application)
   }
 
   case "fennec2":
+  case "adblockbrowser":
   {
-    exports.isKnownWindow = function fmn_isKnownWindow(/**Window*/ window) window.document.documentElement.id == "main-window";
+    exports.isKnownWindow = (window) => window.document.documentElement.id == "main-window";
 
-    exports.getBrowser = function fmn_getBrowser(window) window.BrowserApp.selectedBrowser;
+    exports.getBrowser = (window) => window.BrowserApp.selectedBrowser;
 
-    exports.addTab = function fmn_addTab(window, url, event) window.BrowserApp.addTab(url, {selected: true});
+    exports.addTab = (window, url, event) => window.BrowserApp.addTab(url, {selected: true});
 
     let BrowserChangeListener = function(window, callback)
     {
       this.window = window;
       this.callback = callback;
       this.onSelect = this.onSelect.bind(this);
-      this.attach();
+      this.attach = this.attach.bind(this);
+      if (window.BrowserApp.deck)
+        this.attach();
+      else
+        window.addEventListener("UIReady", this.attach, false);
     };
     BrowserChangeListener.prototype = {
       window: null,
@@ -713,8 +646,8 @@ switch (application)
 
       attach: function()
       {
+        this.window.removeEventListener("UIReady", this.attach, false);
         this.onSelect();
-
         this.window.BrowserApp.deck.addEventListener("TabSelect", this.onSelect, false);
       },
       detach: function()
@@ -784,40 +717,6 @@ switch (application)
       progressListeners.delete(window);
     };
 
-    exports.addBrowserClickListener = function ffn_addBrowserClickListener(/**Window*/ window, /**Function*/ callback)
-    {
-      if (clickListeners.has(window))
-      {
-        clickListeners.get(window).callbacks.push(callback);
-        return;
-      }
-
-      let callbacks = [callback];
-      let listener = new BrowserChangeListener(window, function(oldBrowser, newBrowser)
-      {
-        if (oldBrowser)
-          for (let i = 0; i < callbacks.length; i++)
-            oldBrowser.removeEventListener("click", callbacks[i], true);
-        if (newBrowser)
-          for (let i = 0; i < callbacks.length; i++)
-            newBrowser.addEventListener("click", callbacks[i], true);
-      });
-      listener.callbacks = callbacks;
-
-      clickListeners.set(window, listener);
-    };
-
-    exports.removeBrowserClickListeners = function ffn_removeBrowserClickListeners(/**Window*/ window)
-    {
-      if (!clickListeners.has(window))
-        return;
-
-      let listener = clickListeners.get(window);
-      listener.detach();
-
-      clickListeners.delete(window);
-    };
-
     let {Filter} = require("filterClasses");
     let {Prefs} = require("prefs");
     let {Policy} = require("contentPolicy");
@@ -855,7 +754,7 @@ switch (application)
     onShutdown.add(function()
     {
       let window = null;
-      for (window in UI.applicationWindows)
+      for (window of UI.applicationWindows)
         break;
 
       if (window && menuItem)
@@ -907,6 +806,31 @@ switch (application)
       let dialogMessage = this.overlay.attributes.subscriptionDialogMessage.replace(/\?1\?/, title).replace(/\?2\?/, url);
       if (Utils.confirm(window, dialogMessage, dialogTitle))
         this.setSubscription(url, title);
+    };
+
+    UI.openFiltersDialog = function()
+    {
+      let window = UI.currentWindow;
+      if (!window)
+        return
+
+      let browser = exports.addTab(window, "about:addons").browser;
+      browser.addEventListener("load", function openAddonPrefs(event)
+      {
+        browser.removeEventListener("load", openAddonPrefs, true);
+        Utils.runAsync(function()
+        {
+          // The page won't be ready until the add-on manager data is loaded so we call this method
+          // to know when the data will be ready.
+          AddonManager.getAddonsByTypes(["extension", "theme", "locale"], function()
+          {
+            let event = new Event("Event");
+            event.initEvent("popstate", true, false);
+            event.state = {id: require("info").addonID};
+            browser._contentWindow.dispatchEvent(event);
+          });
+        });
+      }, true);
     };
 
     break;

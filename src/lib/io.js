@@ -1,20 +1,21 @@
-/*
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at http://mozilla.org/MPL/2.0/.
-*/
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
  * @fileOverview Module containing file I/O helpers.
  */
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/FileUtils.jsm");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+let {Services} = Cu.import("resource://gre/modules/Services.jsm", null);
+let {FileUtils} = Cu.import("resource://gre/modules/FileUtils.jsm", null);
+let {OS} = Cu.import("resource://gre/modules/osfile.jsm", null);
+let {Task} = Cu.import("resource://gre/modules/Task.jsm", null);
 
-let {TimeLine} = require("timeline");
+let {Prefs} = require("prefs");
 let {Utils} = require("utils");
+
+let firstRead = true;
+const BUFFER_SIZE = 0x80000;  // 512kB
 
 let IO = exports.IO =
 {
@@ -24,9 +25,8 @@ let IO = exports.IO =
   get lineBreak()
   {
     let lineBreak = (Services.appinfo.OS == "WINNT" ? "\r\n" : "\n");
-    delete IO.lineBreak;
-    IO.__defineGetter__("lineBreak", function() lineBreak);
-    return IO.lineBreak;
+    Object.defineProperty(this, "lineBreak", {value: lineBreak});
+    return lineBreak;
   },
 
   /**
@@ -56,28 +56,17 @@ let IO = exports.IO =
    * each line read and with a null parameter once the read operation is done.
    * The callback will be called when the operation is done.
    */
-  readFromFile: function(/**nsIFile|nsIURI*/ file, /**Boolean*/ decode, /**Object*/ listener, /**Function*/ callback, /**String*/ timeLineID)
+  readFromFile: function(/**nsIFile*/ file, /**Object*/ listener, /**Function*/ callback)
   {
     try
     {
       let processing = false;
       let buffer = "";
       let loaded = false;
-      let error = Cr.NS_OK;
-      let uri = file instanceof Ci.nsIFile ? Services.io.newFileURI(file) : file;
-      let request = new XMLHttpRequest();
-      request.mozBackgroundRequest = true;
-      request.open("GET", uri.spec);
-      request.responseType = "moz-chunked-text";
-      request.overrideMimeType("text/plain" + (decode ? "? charset=utf-8" : ""));
+      let error = null;
 
-      let onProgress = function(data)
+      let onProgress = function*(data)
       {
-        if (timeLineID)
-        {
-          TimeLine.asyncStart(timeLineID);
-        }
-
         let index = (processing ? -1 : Math.max(data.lastIndexOf("\n"), data.lastIndexOf("\r")));
         if (index >= 0)
         {
@@ -92,39 +81,38 @@ let IO = exports.IO =
             lines.pop();
             lines[0] = oldBuffer + lines[0];
             for (let i = 0; i < lines.length; i++)
-              listener.process(lines[i]);
+            {
+              let promise = listener.process(lines[i]);
+              if (promise)
+                yield promise;
+            }
           }
           finally
           {
             processing = false;
             data = buffer;
             buffer = "";
-            onProgress(data);
+            yield* onProgress(data);
 
             if (loaded)
             {
               loaded = false;
-              onLoad();
+              onSuccess();
             }
 
-            if (error != Cr.NS_OK)
+            if (error)
             {
               let param = error;
-              error = Cr.NS_OK;
+              error = null;
               onError(param);
             }
           }
         }
         else
           buffer += data;
-
-        if (timeLineID)
-        {
-          TimeLine.asyncEnd(timeLineID);
-        }
       };
 
-      let onLoad = function()
+      let onSuccess = function()
       {
         if (processing)
         {
@@ -133,163 +121,114 @@ let IO = exports.IO =
           return;
         }
 
-        if (timeLineID)
-        {
-          TimeLine.asyncStart(timeLineID);
-        }
-
+        // We are ignoring return value of listener.process() here because
+        // turning this callback into a generator would be complicated, and
+        // delaying isn't really necessary for the last two calls.
         if (buffer !== "")
           listener.process(buffer);
         listener.process(null);
 
-        if (timeLineID)
-        {
-          TimeLine.asyncEnd(timeLineID);
-          TimeLine.asyncDone(timeLineID);
-        }
-
         callback(null);
       };
 
-      let onError = function(status)
+      let onError = function(e)
       {
         if (processing)
         {
           // Still processing data, delay processing this event.
-          error = status;
+          error = e;
           return;
         }
 
-        let e = Cc["@mozilla.org/js/xpc/Exception;1"].createInstance(Ci.nsIXPCException);
-        e.initialize("File read operation failed", status, null, Components.stack, file, null);
         callback(e);
-
-        if (timeLineID)
-        {
-          TimeLine.asyncDone(timeLineID);
-        }
       };
 
-      request.addEventListener("progress", function(event)
+      let decoder = new TextDecoder();
+      Task.spawn(function*()
       {
-        Utils.runAsync(onProgress.bind(this, event.target.response));
-      }, false);
-      request.addEventListener("load", function(event)
-      {
-        Utils.runAsync(onLoad.bind(this));
-      }, false);
-      request.addEventListener("error", function(event)
-      {
-        Utils.runAsync(onError.bind(this, event.target.channel.status));
-      }, false);
+        if (firstRead && Services.vc.compare(Utils.platformVersion, "23.0a1") <= 0)
+        {
+          // See https://issues.adblockplus.org/ticket/530 - the first file
+          // opened cannot be closed due to Gecko bug 858723. Make sure that
+          // our patterns.ini file doesn't stay locked by opening a dummy file
+          // first.
+          try
+          {
+            let dummyPath = IO.resolveFilePath(Prefs.data_directory + "/dummy").path;
+            let dummy = yield OS.File.open(dummyPath, {write: true, truncate: true});
+            yield dummy.close();
+          }
+          catch (e)
+          {
+            // Dummy might be locked already, we don't care
+          }
+        }
+        firstRead = false;
 
-      request.send(null);
+        let f = yield OS.File.open(file.path, {read: true});
+        while (true)
+        {
+          let array = yield f.read(BUFFER_SIZE);
+          if (!array.length)
+            break;
+
+          let data = decoder.decode(array, {stream: true});
+          yield* onProgress(data);
+        }
+        yield f.close();
+      }.bind(this)).then(onSuccess, onError);
     }
     catch (e)
     {
       callback(e);
     }
   },
+
   /**
-   * Writes string data to a file asynchronously, optionally encodes it into
-   * UTF-8 first. The callback will be called when the write operation is done.
+   * Writes string data to a file in UTF-8 format asynchronously. The callback
+   * will be called when the write operation is done.
    */
-  writeToFile: function(/**nsIFile*/ file, /**Boolean*/ encode, /**Iterator*/ data, /**Function*/ callback, /**String*/ timeLineID)
+  writeToFile: function(/**nsIFile*/ file, /**Iterator*/ data, /**Function*/ callback)
   {
     try
     {
-      let fileStream = FileUtils.openSafeFileOutputStream(file, FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE | FileUtils.MODE_TRUNCATE);
+      let encoder = new TextEncoder();
 
-      let pipe = Cc["@mozilla.org/pipe;1"].createInstance(Ci.nsIPipe);
-      pipe.init(true, true, 0, 0x8000, null);
-
-      let outStream = pipe.outputStream;
-      if (encode)
+      Task.spawn(function*()
       {
-        outStream = Cc["@mozilla.org/intl/converter-output-stream;1"].createInstance(Ci.nsIConverterOutputStream);
-        outStream.init(pipe.outputStream, "UTF-8", 0, Ci.nsIConverterInputStream.DEFAULT_REPLACEMENT_CHARACTER);
-      }
+        // This mimics OS.File.writeAtomic() but writes in chunks.
+        let tmpPath = file.path + ".tmp";
+        let f = yield OS.File.open(tmpPath, {write: true, truncate: true});
 
-      let copier = Cc["@mozilla.org/network/async-stream-copier;1"].createInstance(Ci.nsIAsyncStreamCopier);
-      copier.init(pipe.inputStream, fileStream, null, true, false, 0x8000, true, true);
-      copier.asyncCopy({
-        onStartRequest: function(request, context) {},
-        onStopRequest: function(request, context, result)
-        {
-          if (timeLineID)
-          {
-            TimeLine.asyncDone(timeLineID);
-          }
-
-          if (!Components.isSuccessCode(result))
-          {
-            let e = Cc["@mozilla.org/js/xpc/Exception;1"].createInstance(Ci.nsIXPCException);
-            e.initialize("File write operation failed", result, null, Components.stack, file, null);
-            callback(e);
-          }
-          else
-            callback(null);
-        }
-      }, null);
-
-      let lineBreak = this.lineBreak;
-      let writeNextChunk = function()
-      {
         let buf = [];
         let bufLen = 0;
-        while (bufLen < 0x4000)
+        let lineBreak = this.lineBreak;
+
+        function writeChunk()
         {
-          try
-          {
-            let str = data.next();
-            buf.push(str);
-            bufLen += str.length;
-          }
-          catch (e)
-          {
-            if (e instanceof StopIteration)
-              break;
-            else if (typeof e == "number")
-              pipe.outputStream.closeWithStatus(e);
-            else if (e instanceof Ci.nsIException)
-              pipe.outputStream.closeWithStatus(e.result);
-            else
-            {
-              Cu.reportError(e);
-              pipe.outputStream.closeWithStatus(Cr.NS_ERROR_FAILURE);
-            }
-            return;
-          }
+          let array = encoder.encode(buf.join(lineBreak) + lineBreak);
+          buf = [];
+          bufLen = 0;
+          return f.write(array);
         }
 
-        pipe.outputStream.asyncWait({
-          onOutputStreamReady: function()
-          {
-            if (timeLineID)
-            {
-              TimeLine.asyncStart(timeLineID);
-            }
+        for (let line of data)
+        {
+          buf.push(line);
+          bufLen += line.length;
+          if (bufLen >= BUFFER_SIZE)
+            yield writeChunk();
+        }
 
-            if (buf.length)
-            {
-              let str = buf.join(lineBreak) + lineBreak;
-              if (encode)
-                outStream.writeString(str);
-              else
-                outStream.write(str, str.length);
-              writeNextChunk();
-            }
-            else
-              outStream.close();
+        if (bufLen)
+          yield writeChunk();
 
-            if (timeLineID)
-            {
-              TimeLine.asyncEnd(timeLineID);
-            }
-          }
-        }, 0, 0, Services.tm.currentThread);
-      };
-      writeNextChunk();
+        // OS.File.flush() isn't exposed prior to Gecko 27, see bug 912457.
+        if (typeof f.flush == "function")
+          yield f.flush();
+        yield f.close();
+        yield OS.File.move(tmpPath, file.path, {noCopy: true});
+      }.bind(this)).then(callback.bind(null, null), callback);
     }
     catch (e)
     {
@@ -305,22 +244,8 @@ let IO = exports.IO =
   {
     try
     {
-      let inStream = Cc["@mozilla.org/network/file-input-stream;1"].createInstance(Ci.nsIFileInputStream);
-      inStream.init(fromFile, FileUtils.MODE_RDONLY, 0, Ci.nsIFileInputStream.DEFER_OPEN);
-
-      let outStream = FileUtils.openFileOutputStream(toFile, FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE | FileUtils.MODE_TRUNCATE);
-
-      NetUtil.asyncCopy(inStream, outStream, function(result)
-      {
-        if (!Components.isSuccessCode(result))
-        {
-          let e = Cc["@mozilla.org/js/xpc/Exception;1"].createInstance(Ci.nsIXPCException);
-          e.initialize("File write operation failed", result, null, Components.stack, file, null);
-          callback(e);
-        }
-        else
-          callback(null);
-      });
+      let promise = OS.File.copy(fromFile.path, toFile.path);
+      promise.then(callback.bind(null, null), callback);
     }
     catch (e)
     {
@@ -335,8 +260,10 @@ let IO = exports.IO =
   {
     try
     {
-      fromFile.moveTo(null, newName);
-      callback(null);
+      let toFile = fromFile.clone();
+      toFile.leafName = newName;
+      let promise = OS.File.move(fromFile.path, toFile.path);
+      promise.then(callback.bind(null, null), callback);
     }
     catch(e)
     {
@@ -351,8 +278,8 @@ let IO = exports.IO =
   {
     try
     {
-      file.remove(false);
-      callback(null);
+      let promise = OS.File.remove(file.path);
+      promise.then(callback.bind(null, null), callback);
     }
     catch(e)
     {
@@ -367,12 +294,28 @@ let IO = exports.IO =
   {
     try
     {
-      let exists = file.exists();
-      callback(null, {
-        exists: exists,
-        isDirectory: exists && file.isDirectory(),
-        isFile: exists && file.isFile(),
-        lastModified: exists ? file.lastModifiedTime : 0
+      let promise = OS.File.stat(file.path);
+      promise.then(function onSuccess(info)
+      {
+        callback(null, {
+          exists: true,
+          isDirectory: info.isDir,
+          isFile: !info.isDir,
+          lastModified: info.lastModificationDate.getTime()
+        });
+      }, function onError(e)
+      {
+        if (e.becauseNoSuchFile)
+        {
+          callback(null, {
+            exists: false,
+            isDirectory: false,
+            isFile: false,
+            lastModified: 0
+          });
+        }
+        else
+          callback(e);
       });
     }
     catch(e)

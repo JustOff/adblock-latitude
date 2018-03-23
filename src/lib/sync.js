@@ -1,8 +1,6 @@
-/*
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at http://mozilla.org/MPL/2.0/.
-*/
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
  * @fileOverview Firefox Sync integration
@@ -187,7 +185,7 @@ ABPStore.prototype =
         id: id,
         subscriptions: [],
       };
-      for each (let subscription in FilterStorage.subscriptions)
+      for (let subscription of FilterStorage.subscriptions)
       {
         if (subscription instanceof ExternalSubscription)
           continue;
@@ -200,7 +198,7 @@ ABPStore.prototype =
         if (subscription instanceof SpecialSubscription)
         {
           subscriptionEntry.filters = [];
-          for each (let filter in subscription.filters)
+          for (let filter of subscription.filters)
           {
             let filterEntry = {text: filter.text};
             if (filter instanceof ActiveFilter)
@@ -239,8 +237,8 @@ ABPStore.prototype =
     let data = record.cleartext.subscriptions;
 
     // First make sure we have the same subscriptions on both sides
-    let seenSubscription = {__proto__: null};
-    for each (let remoteSubscription in data)
+    let seenSubscription = Object.create(null);
+    for (let remoteSubscription of data)
     {
       seenSubscription[remoteSubscription.url] = true;
       if (remoteSubscription.url in FilterStorage.knownSubscriptions)
@@ -271,7 +269,7 @@ ABPStore.prototype =
       }
     }
 
-    for each (let subscription in FilterStorage.subscriptions.slice())
+    for (let subscription of FilterStorage.subscriptions.slice())
     {
       if (!(subscription.url in seenSubscription) && subscription instanceof DownloadableSubscription && !trackerInstance.didSubscriptionChange(subscription))
       {
@@ -281,13 +279,13 @@ ABPStore.prototype =
     }
 
     // Now sync the custom filters
-    let seenFilter = {__proto__: null};
-    for each (let remoteSubscription in data)
+    let seenFilter = Object.create(null);
+    for (let remoteSubscription of data)
     {
       if (!("filters" in remoteSubscription))
         continue;
 
-      for each (let remoteFilter in remoteSubscription.filters)
+      for (let remoteFilter of remoteSubscription.filters)
       {
         seenFilter[remoteFilter.text] = true;
 
@@ -295,7 +293,7 @@ ABPStore.prototype =
         if (trackerInstance.didFilterChange(filter))
           continue;
 
-        if (filter.subscriptions.some(function(subscription) subscription instanceof SpecialSubscription))
+        if (filter.subscriptions.some((subscription) => subscription instanceof SpecialSubscription))
         {
           // Filter might have been changed remotely
           if (filter instanceof ActiveFilter)
@@ -309,12 +307,12 @@ ABPStore.prototype =
       }
     }
 
-    for each (let subscription in FilterStorage.subscriptions)
+    for (let subscription of FilterStorage.subscriptions)
     {
       if (!(subscription instanceof SpecialSubscription))
         continue;
 
-      for each (let filter in subscription.filters.slice())
+      for (let filter of subscription.filters.slice())
       {
         if (!(filter.text in seenFilter) && !trackerInstance.didFilterChange(filter))
         {
@@ -337,13 +335,13 @@ ABPStore.prototype =
   {
     this._log.trace("Got wipe command, removing all data");
 
-    for each (let subscription in FilterStorage.subscriptions.slice())
+    for (let subscription of FilterStorage.subscriptions.slice())
     {
       if (subscription instanceof DownloadableSubscription)
         FilterStorage.removeSubscription(subscription);
       else if (subscription instanceof SpecialSubscription)
       {
-        for each (let filter in subscription.filters.slice())
+        for (let filter of subscription.filters.slice())
           FilterStorage.removeFilter(filter);
       }
     }
@@ -424,9 +422,9 @@ ABPTracker.prototype =
         else if (item instanceof SpecialSubscription)
         {
           // User's filters changed via Preferences window
-          for each (let filter in item.filters)
+          for (let filter of item.filters)
             this.addPrivateChange("filter " + filter.text);
-          for each (let filter in item.oldFilters)
+          for (let filter of item.oldFilters)
             this.addPrivateChange("filter " + filter.text);
         }
         break;

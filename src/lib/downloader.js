@@ -1,8 +1,6 @@
-/*
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at http://mozilla.org/MPL/2.0/.
-*/
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
  * @fileOverview Downloads a set of URLs in regular time intervals.
@@ -109,7 +107,7 @@ Downloader.prototype =
   _doCheck: function()
   {
     let now = Date.now();
-    for each (let downloadable in this.dataSource())
+    for (let downloadable of this.dataSource())
     {
       if (downloadable.lastCheck && now - downloadable.lastCheck > this.maxAbsenceInterval)
       {
@@ -180,13 +178,18 @@ Downloader.prototype =
       url += "&";
     else
       url += "?";
+    // We limit the download count to 4+ to keep the request anonymized
+    let downloadCount = downloadable.downloadCount;
+    if (downloadCount > 4)
+      downloadCount = "4+";
     url += "addonName=" + encodeURIComponent(addonName) +
         "&addonVersion=" + encodeURIComponent(addonVersion) +
         "&application=" + encodeURIComponent(application) +
         "&applicationVersion=" + encodeURIComponent(applicationVersion) +
         "&platform=" + encodeURIComponent(platform) +
         "&platformVersion=" + encodeURIComponent(platformVersion) +
-        "&lastVersion=" + encodeURIComponent(downloadable.lastVersion);
+        "&lastVersion=" + encodeURIComponent(downloadable.lastVersion) +
+        "&downloadCount=" + encodeURIComponent(downloadCount);
     return url;
   },
 
@@ -280,6 +283,8 @@ Downloader.prototype =
         return;
       }
 
+      downloadable.downloadCount++;
+
       this.onDownloadSuccess(downloadable, request.responseText, errorCallback, function redirectCallback(url)
       {
         if (redirects >= this.maxRedirects)
@@ -367,4 +372,10 @@ Downloadable.prototype =
    * @type Integer
    */
   hardExpiration: 0,
+  
+  /**
+   * Number indicating how often the object was downloaded.
+   * @type Integer
+   */
+  downloadCount: 0,
 };

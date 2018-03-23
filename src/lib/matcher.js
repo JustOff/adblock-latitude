@@ -1,8 +1,6 @@
-/*
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at http://mozilla.org/MPL/2.0/.
-*/
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
  * @fileOverview Matcher class implementing matching addresses against a list of filters.
@@ -38,8 +36,8 @@ Matcher.prototype = {
    */
   clear: function()
   {
-    this.filterByKeyword = {__proto__: null};
-    this.keywordByFilter = {__proto__: null};
+    this.filterByKeyword = Object.create(null);
+    this.keywordByFilter = Object.create(null);
   },
 
   /**
@@ -154,13 +152,18 @@ Matcher.prototype = {
   /**
    * Checks whether the entries for a particular keyword match a URL
    */
-  _checkEntryMatch: function(keyword, location, contentType, docDomain, thirdParty)
+  _checkEntryMatch: function(keyword, location, typeMask, docDomain, thirdParty, sitekey, specificOnly)
   {
     let list = this.filterByKeyword[keyword];
     for (let i = 0; i < list.length; i++)
     {
       let filter = list[i];
-      if (filter.matches(location, contentType, docDomain, thirdParty))
+
+      if (specificOnly && filter.isGeneric() &&
+          !(filter instanceof WhitelistFilter))
+        continue;
+
+      if (filter.matches(location, typeMask, docDomain, thirdParty, sitekey))
         return filter;
     }
     return null;
@@ -169,12 +172,14 @@ Matcher.prototype = {
   /**
    * Tests whether the URL matches any of the known filters
    * @param {String} location URL to be tested
-   * @param {String} contentType content type identifier of the URL
+   * @param {number} typeMask bitmask of content / request types to match
    * @param {String} docDomain domain name of the document that loads the URL
    * @param {Boolean} thirdParty should be true if the URL is a third-party request
+   * @param {String} sitekey public key provided by the document
+   * @param {Boolean} specificOnly should be true if generic matches should be ignored
    * @return {RegExpFilter} matching filter or null
    */
-  matchesAny: function(location, contentType, docDomain, thirdParty)
+  matchesAny: function(location, typeMask, docDomain, thirdParty, sitekey, specificOnly)
   {
     let candidates = location.toLowerCase().match(/[a-z0-9%]{3,}/g);
     if (candidates === null)
@@ -185,7 +190,7 @@ Matcher.prototype = {
       let substr = candidates[i];
       if (substr in this.filterByKeyword)
       {
-        let result = this._checkEntryMatch(substr, location, contentType, docDomain, thirdParty);
+        let result = this._checkEntryMatch(substr, location, typeMask, docDomain, thirdParty, sitekey, specificOnly);
         if (result)
           return result;
       }
@@ -204,7 +209,7 @@ function CombinedMatcher()
 {
   this.blacklist = new Matcher();
   this.whitelist = new Matcher();
-  this.resultCache = {__proto__: null};
+  this.resultCache = Object.create(null);
 }
 exports.CombinedMatcher = CombinedMatcher;
 
@@ -247,7 +252,7 @@ CombinedMatcher.prototype =
   {
     this.blacklist.clear();
     this.whitelist.clear();
-    this.resultCache = {__proto__: null};
+    this.resultCache = Object.create(null);
     this.cacheEntries = 0;
   },
 
@@ -257,15 +262,13 @@ CombinedMatcher.prototype =
   add: function(filter)
   {
     if (filter instanceof WhitelistFilter)
-    {      
-        this.whitelist.add(filter);
-    }
+      this.whitelist.add(filter);
     else
       this.blacklist.add(filter);
 
     if (this.cacheEntries > 0)
     {
-      this.resultCache = {__proto__: null};
+      this.resultCache = Object.create(null);
       this.cacheEntries = 0;
     }
   },
@@ -276,15 +279,13 @@ CombinedMatcher.prototype =
   remove: function(filter)
   {
     if (filter instanceof WhitelistFilter)
-    {      
-        this.whitelist.remove(filter);
-    }
+      this.whitelist.remove(filter);
     else
       this.blacklist.remove(filter);
 
     if (this.cacheEntries > 0)
     {
-      this.resultCache = {__proto__: null};
+      this.resultCache = Object.create(null);
       this.cacheEntries = 0;
     }
   },
@@ -339,7 +340,7 @@ CombinedMatcher.prototype =
    * simultaneously. For parameters see Matcher.matchesAny().
    * @see Matcher#matchesAny
    */
-  matchesAnyInternal: function(location, contentType, docDomain, thirdParty)
+  matchesAnyInternal: function(location, typeMask, docDomain, thirdParty, sitekey, specificOnly)
   {
     let candidates = location.toLowerCase().match(/[a-z0-9%]{3,}/g);
     if (candidates === null)
@@ -352,12 +353,12 @@ CombinedMatcher.prototype =
       let substr = candidates[i];
       if (substr in this.whitelist.filterByKeyword)
       {
-        let result = this.whitelist._checkEntryMatch(substr, location, contentType, docDomain, thirdParty);
+        let result = this.whitelist._checkEntryMatch(substr, location, typeMask, docDomain, thirdParty, sitekey);
         if (result)
           return result;
       }
       if (substr in this.blacklist.filterByKeyword && blacklistHit === null)
-        blacklistHit = this.blacklist._checkEntryMatch(substr, location, contentType, docDomain, thirdParty);
+        blacklistHit = this.blacklist._checkEntryMatch(substr, location, typeMask, docDomain, thirdParty, sitekey, specificOnly);
     }
     return blacklistHit;
   },
@@ -365,17 +366,17 @@ CombinedMatcher.prototype =
   /**
    * @see Matcher#matchesAny
    */
-  matchesAny: function(location, contentType, docDomain, thirdParty)
+  matchesAny: function(location, typeMask, docDomain, thirdParty, sitekey, specificOnly)
   {
-    let key = location + " " + contentType + " " + docDomain + " " + thirdParty;
+    let key = location + " " + typeMask + " " + docDomain + " " + thirdParty + " " + sitekey + " " + specificOnly;
     if (key in this.resultCache)
       return this.resultCache[key];
 
-    let result = this.matchesAnyInternal(location, contentType, docDomain, thirdParty);
+    let result = this.matchesAnyInternal(location, typeMask, docDomain, thirdParty, sitekey, specificOnly);
 
     if (this.cacheEntries >= CombinedMatcher.maxCacheEntries)
     {
-      this.resultCache = {__proto__: null};
+      this.resultCache = Object.create(null);
       this.cacheEntries = 0;
     }
 
@@ -383,8 +384,7 @@ CombinedMatcher.prototype =
     this.cacheEntries++;
 
     return result;
-  },
-
+  }
 }
 
 /**

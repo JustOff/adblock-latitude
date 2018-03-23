@@ -1,646 +1,292 @@
-/*
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at http://mozilla.org/MPL/2.0/.
-*/
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
  * @fileOverview Content policy implementation, responsible for blocking things.
  */
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
+"use strict";
 
-let {TimeLine} = require("timeline");
+let {XPCOMUtils} = Cu.import("resource://gre/modules/XPCOMUtils.jsm", {});
+let {Services} = Cu.import("resource://gre/modules/Services.jsm", {});
+
 let {Utils} = require("utils");
+let {port} = require("messaging");
 let {Prefs} = require("prefs");
 let {FilterStorage} = require("filterStorage");
-let {BlockingFilter, WhitelistFilter} = require("filterClasses");
+let {BlockingFilter, WhitelistFilter, RegExpFilter} = require("filterClasses");
 let {defaultMatcher} = require("matcher");
-let {objectMouseEventHander} = require("objectTabs");
-let {RequestNotifier} = require("requestNotifier");
-let {ElemHide} = require("elemHide");
-
-/**
- * List of explicitly supported content types
- * @type Array of String
- */
-let contentTypes = ["OTHER", "SCRIPT", "IMAGE", "STYLESHEET", "OBJECT", "SUBDOCUMENT", "DOCUMENT", "XMLHTTPREQUEST", "OBJECT_SUBREQUEST", "FONT", "MEDIA"];
-
-/**
- * List of content types that aren't associated with a visual document area
- * @type Array of String
- */
-let nonVisualTypes = ["SCRIPT", "STYLESHEET", "XMLHTTPREQUEST", "OBJECT_SUBREQUEST", "FONT"];
-
-/**
- * Randomly generated class name, to be applied to collapsed nodes.
- */
-let collapsedClass = "";
 
 /**
  * Public policy checking functions and auxiliary objects
  * @class
  */
-let Policy = exports.Policy =
+var Policy = exports.Policy =
 {
   /**
-   * Map of content type identifiers by their name.
-   * @type Object
+   * Map of content types reported by Firefox to the respecitve content types
+   * used by Adblock Plus. Other content types are simply mapped to OTHER.
+   * @type Map.<string,string>
    */
-  type: {},
+  contentTypes: new Map(function* ()
+  {
+    // Treat navigator.sendBeacon() the same as <a ping>,
+    // it's essentially the same concept - merely generalized.
+    yield ["BEACON", "PING"];
+
+    // Treat <img srcset> and <picture> the same as other images.
+    yield ["IMAGESET", "IMAGE"];
+
+    // Treat fetch() the same as XMLHttpRequest,
+    // it's essentially the same - merely a more modern API.
+    yield ["FETCH", "XMLHTTPREQUEST"];
+
+    // Everything else is mapped to itself
+    for (let contentType of ["OTHER", "SCRIPT", "IMAGE", "STYLESHEET", "OBJECT",
+                             "SUBDOCUMENT", "DOCUMENT", "XMLHTTPREQUEST",
+                             "OBJECT_SUBREQUEST", "FONT", "MEDIA", "PING",
+                             "WEBSOCKET", "ELEMHIDE", "POPUP", "GENERICHIDE",
+                             "GENERICBLOCK"])
+      yield [contentType, contentType];
+  }()),
 
   /**
-   * Map of content type names by their identifiers (reverse of type map).
-   * @type Object
+   * Set of content types that aren't associated with a visual document area
+   * @type Set.<string>
    */
-  typeDescr: {},
-
-  /**
-   * Map of localized content type names by their identifiers.
-   * @type Object
-   */
-  localizedDescr: {},
-
-  /**
-   * Lists the non-visual content types.
-   * @type Object
-   */
-  nonVisual: {},
+  nonVisualTypes: new Set([
+    "SCRIPT", "STYLESHEET", "XMLHTTPREQUEST", "OBJECT_SUBREQUEST", "FONT",
+    "PING", "WEBSOCKET", "ELEMHIDE", "POPUP", "GENERICHIDE", "GENERICBLOCK"
+  ]),
 
   /**
    * Map containing all schemes that should be ignored by content policy.
-   * @type Object
+   * @type Set.<string>
    */
-  whitelistSchemes: {},
+  whitelistSchemes: new Set(),
 
   /**
    * Called on module startup, initializes various exported properties.
    */
   init: function()
   {
-    TimeLine.enter("Entered content policy initialization");
-
-    // type constant by type description and type description by type constant
-    let iface = Ci.nsIContentPolicy;
-    for each (let typeName in contentTypes)
-    {
-      if ("TYPE_" + typeName in iface)
-      {
-        let id = iface["TYPE_" + typeName];
-        this.type[typeName] = id;
-        this.typeDescr[id] = typeName;
-        this.localizedDescr[id] = Utils.getString("type_label_" + typeName.toLowerCase());
-      }
-    }
-
-    this.type.ELEMHIDE = 0xFFFD;
-    this.typeDescr[0xFFFD] = "ELEMHIDE";
-    this.localizedDescr[0xFFFD] = Utils.getString("type_label_elemhide");
-
-    this.type.POPUP = 0xFFFE;
-    this.typeDescr[0xFFFE] = "POPUP";
-    this.localizedDescr[0xFFFE] = Utils.getString("type_label_popup");
-
-    for each (let type in nonVisualTypes)
-      this.nonVisual[this.type[type]] = true;
-
     // whitelisted URL schemes
-    for each (let scheme in Prefs.whitelistschemes.toLowerCase().split(" "))
-      this.whitelistSchemes[scheme] = true;
+    for (let scheme of Prefs.whitelistschemes.toLowerCase().split(" "))
+      this.whitelistSchemes.add(scheme);
 
-    TimeLine.log("done initializing types");
+    port.on("shouldAllow", (message, sender) => this.shouldAllow(message));
 
-    // Generate class identifier used to collapse node and register corresponding
-    // stylesheet.
-    TimeLine.log("registering global stylesheet");
-
+    // Generate class identifier used to collapse nodes and register
+    // corresponding stylesheet.
+    let collapsedClass = "";
     let offset = "a".charCodeAt(0);
     for (let i = 0; i < 20; i++)
       collapsedClass +=  String.fromCharCode(offset + Math.random() * 26);
+    port.on("getCollapsedClass", (message, sender) => collapsedClass);
 
     let collapseStyle = Services.io.newURI("data:text/css," +
         encodeURIComponent("." + collapsedClass +
         "{-moz-binding: url(chrome://global/content/bindings/general.xml#foobarbazdummy) !important;}"), null, null);
     Utils.styleService.loadAndRegisterSheet(collapseStyle, Ci.nsIStyleSheetService.USER_SHEET);
-    onShutdown.add(function()
+    onShutdown.add(() =>
     {
       Utils.styleService.unregisterSheet(collapseStyle, Ci.nsIStyleSheetService.USER_SHEET);
-    })
-    TimeLine.log("done registering stylesheet");
-
-    TimeLine.leave("Done initializing content policy");
+    });
   },
 
   /**
    * Checks whether a node should be blocked, hides it if necessary
-   * @param wnd {nsIDOMWindow}
-   * @param node {nsIDOMElement}
-   * @param contentType {String}
-   * @param location {nsIURI}
-   * @param collapse {Boolean} true to force hiding of the node
-   * @return {Boolean} false if the node should be blocked
+   * @param {Object} data  request data
+   * @param {String} data.contentType
+   * @param {String} data.location  location of the request
+   * @param {Object[]} data.frames
+   * @param {Boolean} data.isPrivate  true if the request belongs to a private browsing window
+   * @return {Object} An object containing properties allow, collapse and hits
+   *                  indicating how this request should be handled.
    */
-  processNode: function(wnd, node, contentType, location, collapse)
+  shouldAllow: function({contentType, location, frames, isPrivate})
   {
-    let topWnd = wnd.top;
-    if (!topWnd || !topWnd.location || !topWnd.location.href)
-      return true;
+    let hits = [];
 
-    let originWindow = Utils.getOriginWindow(wnd);
-    let wndLocation = originWindow.location.href;
-    let docDomain = getHostname(wndLocation);
+    function addHit(frameIndex, contentType, docDomain, thirdParty, location, filter)
+    {
+      if (filter && !isPrivate)
+        FilterStorage.increaseHitCount(filter);
+      hits.push({
+        frameIndex, contentType, docDomain, thirdParty, location,
+        filter: filter ? filter.text : null,
+        filterType: filter ? filter.type : null
+      });
+    }
+
+    function response(allow, collapse)
+    {
+      return {allow, collapse, hits};
+    }
+
+    // Ignore whitelisted schemes
+    if (contentType != "POPUP" && !this.isBlockableScheme(location))
+      return response(true, false);
+
+    // Interpret unknown types as "other"
+    contentType = this.contentTypes.get(contentType) || "OTHER";
+
+    let nogeneric = false;
+    if (Prefs.enabled)
+    {
+      let whitelistHit =
+          this.isFrameWhitelisted(frames, false);
+      if (whitelistHit)
+      {
+        let [frameIndex, matchType, docDomain, thirdParty, location, filter] = whitelistHit;
+        addHit(frameIndex, matchType, docDomain, thirdParty, location, filter);
+        if (matchType == "DOCUMENT")
+          return response(true, false);
+        else
+          nogeneric = true;
+      }
+    }
+
     let match = null;
-    if (!match && Prefs.enabled)
+    let wndLocation = frames[0].location;
+    let docDomain = getHostname(wndLocation);
+    let [sitekey, sitekeyFrame] = getSitekey(frames);
+
+    let thirdParty = isThirdParty(location, docDomain);
+    let collapse = false;
+    if (!match && Prefs.enabled && RegExpFilter.typeMap.hasOwnProperty(contentType))
     {
-      let testWnd = wnd;
-      let parentWndLocation = getWindowLocation(testWnd);
-      while (true)
-      {
-        let testWndLocation = parentWndLocation;
-        parentWndLocation = (testWnd == testWnd.parent ? testWndLocation : getWindowLocation(testWnd.parent));
-        match = Policy.isWhitelisted(testWndLocation, parentWndLocation);
-
-        if (!(match instanceof WhitelistFilter))      
-
-        if (match instanceof WhitelistFilter)
-        {
-          FilterStorage.increaseHitCount(match, wnd);
-          RequestNotifier.addNodeData(testWnd.document, topWnd, Policy.type.DOCUMENT, getHostname(parentWndLocation), false, testWndLocation, match);
-          return true;
-        }
-
-        if (testWnd.parent == testWnd)
-          break;
-        else
-          testWnd = testWnd.parent;
-      }
+      match = defaultMatcher.matchesAny(location, RegExpFilter.typeMap[contentType],
+                                        docDomain, thirdParty, sitekey, nogeneric);
+      if (match instanceof BlockingFilter && !this.nonVisualTypes.has(contentType))
+        collapse = (match.collapse != null ? match.collapse : !Prefs.fastcollapse);
     }
+    addHit(null, contentType, docDomain, thirdParty, location, match);
 
-    // Data loaded by plugins should be attached to the document
-    if (contentType == Policy.type.OBJECT_SUBREQUEST && node instanceof Ci.nsIDOMElement)
-      node = node.ownerDocument;
-
-    // Fix type for objects misrepresented as frames or images
-    if (contentType != Policy.type.OBJECT && (node instanceof Ci.nsIDOMHTMLObjectElement || node instanceof Ci.nsIDOMHTMLEmbedElement))
-      contentType = Policy.type.OBJECT;
-
-    let locationText = location.spec;
-    if (!match && contentType == Policy.type.ELEMHIDE)
-    {
-      let testWnd = wnd;
-      let parentWndLocation = getWindowLocation(testWnd);
-      while (true)
-      {
-        let testWndLocation = parentWndLocation;
-        parentWndLocation = (testWnd == testWnd.parent ? testWndLocation : getWindowLocation(testWnd.parent));
-        let parentDocDomain = getHostname(parentWndLocation);
-        match = defaultMatcher.matchesAny(testWndLocation, "ELEMHIDE", parentDocDomain, false);
-        if (match instanceof WhitelistFilter)
-        {
-          FilterStorage.increaseHitCount(match, wnd);
-          RequestNotifier.addNodeData(testWnd.document, topWnd, contentType, parentDocDomain, false, testWndLocation, match);
-          return true;
-        }
-
-        if (testWnd.parent == testWnd)
-          break;
-        else
-          testWnd = testWnd.parent;
-      }
-
-      match = location;
-      locationText = match.text.replace(/^.*?#/, '#');
-      location = locationText;
-
-      if (!match.isActiveOnDomain(docDomain))
-        return true;
-
-      let exception = ElemHide.getException(match, docDomain);
-      if (exception)
-      {
-        FilterStorage.increaseHitCount(exception, wnd);
-        RequestNotifier.addNodeData(node, topWnd, contentType, docDomain, thirdParty, locationText, exception);
-        return true;
-      }
-    }
-
-    let thirdParty = (contentType == Policy.type.ELEMHIDE ? false : isThirdParty(location, docDomain));
-
-    if (!match && Prefs.enabled)
-    {
-      match = defaultMatcher.matchesAny(locationText, Policy.typeDescr[contentType] || "", docDomain, thirdParty);
-      if (match instanceof BlockingFilter && node.ownerDocument && !(contentType in Policy.nonVisual))
-      {
-        let prefCollapse = (match.collapse != null ? match.collapse : !Prefs.fastcollapse);
-        if (collapse || prefCollapse)
-          schedulePostProcess(node);
-      }
-
-      // Track mouse events for objects
-      if (!match && contentType == Policy.type.OBJECT && node.nodeType == Ci.nsIDOMNode.ELEMENT_NODE)
-      {
-        node.addEventListener("mouseover", objectMouseEventHander, true);
-        node.addEventListener("mouseout", objectMouseEventHander, true);
-      }
-    }
-
-    // Store node data
-    RequestNotifier.addNodeData(node, topWnd, contentType, docDomain, thirdParty, locationText, match);
-    if (match)
-      FilterStorage.increaseHitCount(match, wnd);
-
-    return !match || match instanceof WhitelistFilter;
+    return response(!match || match instanceof WhitelistFilter, collapse);
   },
 
   /**
    * Checks whether the location's scheme is blockable.
-   * @param location  {nsIURI}
+   * @param location  {nsIURI|String}
    * @return {Boolean}
    */
   isBlockableScheme: function(location)
   {
-    return !(location.scheme in Policy.whitelistSchemes);
+    let scheme;
+    if (typeof location == "string")
+    {
+      let match = /^([\w\-]+):/.exec(location);
+      scheme = match ? match[1] : null;
+    }
+    else
+      scheme = location.scheme;
+    return !this.whitelistSchemes.has(scheme);
   },
 
   /**
-   * Checks whether a page is whitelisted.
+   * Checks whether a top-level window is whitelisted.
    * @param {String} url
-   * @param {String} [parentUrl] location of the parent page
-   * @return {Filter} filter that matched the URL or null if not whitelisted
+   *    URL of the document loaded into the window
+   * @return {?WhitelistFilter}
+   *    exception rule that matched the URL if any
    */
-  isWhitelisted: function(url, parentUrl)
+  isWhitelisted: function(url)
   {
     if (!url)
       return null;
 
     // Do not apply exception rules to schemes on our whitelistschemes list.
-    let match = /^([\w\-]+):/.exec(url);
-    if (match && match[1] in Policy.whitelistSchemes)
+    if (!this.isBlockableScheme(url))
       return null;
-
-    if (!parentUrl)
-      parentUrl = url;
 
     // Ignore fragment identifier
     let index = url.indexOf("#");
     if (index >= 0)
       url = url.substring(0, index);
 
-    let result = defaultMatcher.matchesAny(url, "DOCUMENT", getHostname(parentUrl), false);
+    let result = defaultMatcher.matchesAny(url, RegExpFilter.typeMap.DOCUMENT,
+        getHostname(url), false, null);
     return (result instanceof WhitelistFilter ? result : null);
   },
 
   /**
-   * Checks whether the page loaded in a window is whitelisted.
-   * @param wnd {nsIDOMWindow}
-   * @return {Filter} matching exception rule or null if not whitelisted
+   * Checks whether a frame is whitelisted.
+   * @param {Array} frames
+   *    frame structure as returned by getFrames() in child/utils module.
+   * @param {boolean} isElemHide
+   *    true if element hiding whitelisting should be considered
+   * @return {?Array}
+   *    An array with the hit parameters: frameIndex, contentType, docDomain,
+   *    thirdParty, location, filter. Note that the filter could be a
+   *    genericblock/generichide exception rule. If nothing matched null is
+   *    returned.
    */
-  isWindowWhitelisted: function(wnd)
+  isFrameWhitelisted: function(frames, isElemHide)
   {
-    return Policy.isWhitelisted(getWindowLocation(wnd));
+    let [sitekey, sitekeyFrame] = getSitekey(frames);
+    let nogenericHit = null;
+
+    let typeMap = RegExpFilter.typeMap.DOCUMENT;
+    if (isElemHide)
+      typeMap = typeMap | RegExpFilter.typeMap.ELEMHIDE;
+    let genericType = (isElemHide ? "GENERICHIDE" : "GENERICBLOCK");
+
+    for (let i = 0; i < frames.length; i++)
+    {
+      let frame = frames[i];
+      let wndLocation = frame.location;
+      let parentWndLocation = frames[Math.min(i + 1, frames.length - 1)].location;
+      let parentDocDomain = getHostname(parentWndLocation);
+
+      let match = defaultMatcher.matchesAny(wndLocation, typeMap, parentDocDomain, false, sitekey);
+      if (match instanceof WhitelistFilter)
+      {
+        let whitelistType = (match.contentType & RegExpFilter.typeMap.DOCUMENT) ? "DOCUMENT" : "ELEMHIDE";
+        return [i, whitelistType, parentDocDomain, false, wndLocation, match];
+      }
+
+      if (!nogenericHit)
+      {
+        match = defaultMatcher.matchesAny(wndLocation,
+            RegExpFilter.typeMap[genericType], parentDocDomain, false, sitekey);
+        if (match instanceof WhitelistFilter)
+          nogenericHit = [i, genericType, parentDocDomain, false, wndLocation, match];
+      }
+
+      if (frame == sitekeyFrame)
+        [sitekey, sitekeyFrame] = getSitekey(frames.slice(i + 1));
+    }
+
+    return nogenericHit;
   },
 
+  /**
+   * Deletes nodes that were previously stored with a
+   * RequestNotifier.storeNodesForEntries() call or similar.
+   * @param {string} id  unique ID of the nodes
+   */
+  deleteNodes: function(id)
+  {
+    port.emit("deleteNodes", id);
+  },
 
   /**
-   * Asynchronously re-checks filters for given nodes.
+   * Asynchronously re-checks filters for nodes given by an ID previously
+   * returned by a RequestNotifier.storeNodesForEntries() call or similar.
+   * @param {string} id  unique ID of the nodes
+   * @param {RequestEntry} entry
    */
-  refilterNodes: function(/**Node[]*/ nodes, /**RequestEntry*/ entry)
+  refilterNodes: function(id, entry)
   {
-    // Ignore nodes that have been blocked already
-    if (entry.filter && !(entry.filter instanceof WhitelistFilter))
-      return;
-
-    for each (let node in nodes)
-      Utils.runAsync(refilterNode, this, node, entry);
+    port.emit("refilterNodes", {
+      nodesID: id,
+      entry: entry
+    });
   }
 };
 Policy.init();
-
-/**
- * Actual nsIContentPolicy and nsIChannelEventSink implementation
- * @class
- */
-let PolicyImplementation =
-{
-  classDescription: "Adblock Plus content policy",
-  classID: Components.ID("cfeaabe6-1dd1-11b2-a0c6-cb5c268894c9"),
-  contractID: "@adblockplus.org/abp/policy;1",
-  xpcom_categories: ["content-policy", "net-channel-event-sinks"],
-
-  /**
-   * Registers the content policy on startup.
-   */
-  init: function()
-  {
-    let registrar = Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
-    try
-    {
-      registrar.registerFactory(this.classID, this.classDescription, this.contractID, this);
-    }
-    catch (e if e.result == Cr.NS_ERROR_FACTORY_EXISTS)
-    {
-      // See bug 924340 - it might be too early to init now, the old version
-      // we are replacing didn't finish removing itself yet.
-      Utils.runAsync(this.init.bind(this));
-      return;
-    }
-
-    let catMan = Utils.categoryManager;
-    for each (let category in this.xpcom_categories)
-      catMan.addCategoryEntry(category, this.contractID, this.contractID, false, true);
-
-    // http-on-opening-request is new in Gecko 18, http-on-modify-request can
-    // be used in earlier releases.
-    let httpTopic = "http-on-opening-request";
-
-    Services.obs.addObserver(this, httpTopic, true);
-    Services.obs.addObserver(this, "content-document-global-created", true);
-    Services.obs.addObserver(this, "xpcom-category-entry-removed", true);
-    Services.obs.addObserver(this, "xpcom-category-cleared", true);
-
-    onShutdown.add(function()
-    {
-      // Our category observers should be removed before changing category
-      // memberships, just in case.
-      Services.obs.removeObserver(this, httpTopic);
-      Services.obs.removeObserver(this, "content-document-global-created");
-      Services.obs.removeObserver(this, "xpcom-category-entry-removed");
-      Services.obs.removeObserver(this, "xpcom-category-cleared");
-
-      for each (let category in this.xpcom_categories)
-        catMan.deleteCategoryEntry(category, this.contractID, false);
-
-      // This needs to run asynchronously, see bug 753687
-      Utils.runAsync(function()
-      {
-        registrar.unregisterFactory(this.classID, this);
-      }.bind(this));
-
-      this.previousRequest = null;
-    }.bind(this));
-  },
-
-  //
-  // nsISupports interface implementation
-  //
-
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIContentPolicy, Ci.nsIObserver,
-    Ci.nsIChannelEventSink, Ci.nsIFactory, Ci.nsISupportsWeakReference]),
-
-  //
-  // nsIContentPolicy interface implementation
-  //
-
-  shouldLoad: function(contentType, contentLocation, requestOrigin, node, mimeTypeGuess, extra)
-  {
-    // Ignore requests without context and top-level documents
-    if (!node || contentType == Policy.type.DOCUMENT)
-      return Ci.nsIContentPolicy.ACCEPT;
-
-    // Ignore standalone objects
-    if (contentType == Policy.type.OBJECT && node.ownerDocument && !/^text\/|[+\/]xml$/.test(node.ownerDocument.contentType))
-      return Ci.nsIContentPolicy.ACCEPT;
-
-    let wnd = Utils.getWindow(node);
-    if (!wnd)
-      return Ci.nsIContentPolicy.ACCEPT;
-
-    // Ignore whitelisted schemes
-    let location = Utils.unwrapURL(contentLocation);
-    if (!Policy.isBlockableScheme(location))
-      return Ci.nsIContentPolicy.ACCEPT;
-
-    // Interpret unknown types as "other"
-    if (!(contentType in Policy.typeDescr))
-      contentType = Policy.type.OTHER;
-
-    let result = Policy.processNode(wnd, node, contentType, location, false);
-    if (result)
-    {
-      // We didn't block this request so we will probably see it again in
-      // http-on-opening-request. Keep it so that we can associate it with the
-      // channel there - will be needed in case of redirect.
-      this.previousRequest = [location, contentType];
-    }
-    return (result ? Ci.nsIContentPolicy.ACCEPT : Ci.nsIContentPolicy.REJECT_REQUEST);
-  },
-
-  shouldProcess: function(contentType, contentLocation, requestOrigin, insecNode, mimeType, extra)
-  {
-    return Ci.nsIContentPolicy.ACCEPT;
-  },
-
-  //
-  // nsIObserver interface implementation
-  //
-  observe: function(subject, topic, data, additional)
-  {
-    switch (topic)
-    {
-      case "content-document-global-created":
-      {
-        if (!(subject instanceof Ci.nsIDOMWindow) || !subject.opener)
-          return;
-
-        let uri = additional || Utils.makeURI(subject.location.href);
-        if (!Policy.processNode(subject.opener, subject.opener.document, Policy.type.POPUP, uri, false))
-        {
-          subject.stop();
-          Utils.runAsync(subject.close, subject);
-        }
-        else if (uri.spec == "about:blank")
-        {
-          // An about:blank pop-up most likely means that a load will be
-          // initiated synchronously. Set a flag for our "http-on-opening-request"
-          // handler.
-          this.expectingPopupLoad = true;
-          Utils.runAsync(function()
-          {
-            this.expectingPopupLoad = false;
-          });
-        }
-        break;
-      }
-      case "http-on-opening-request":
-      case "http-on-modify-request":
-      {
-        if (!(subject instanceof Ci.nsIHttpChannel))
-          return;
-
-        if (this.previousRequest && subject.URI == this.previousRequest[0] &&
-            subject instanceof Ci.nsIWritablePropertyBag)
-        {
-          // We just handled a content policy call for this request - associate
-          // the data with the channel so that we can find it in case of a redirect.
-          subject.setProperty("abpRequestType", this.previousRequest[1]);
-          this.previousRequest = null;
-        }
-
-        if (this.expectingPopupLoad)
-        {
-          let wnd = Utils.getRequestWindow(subject);
-          if (wnd && wnd.opener && wnd.location.href == "about:blank")
-          {
-            this.observe(wnd, "content-document-global-created", null, subject.URI);
-            if (subject instanceof Ci.nsIWritablePropertyBag)
-              subject.setProperty("abpRequestType", Policy.type.POPUP);
-          }
-        }
-
-        break;
-      }
-      case "xpcom-category-entry-removed":
-      case "xpcom-category-cleared":
-      {
-        let category = data;
-        if (this.xpcom_categories.indexOf(category) < 0)
-          return;
-
-        if (topic == "xpcom-category-entry-removed" &&
-            subject instanceof Ci.nsISupportsCString &&
-            subject.data != this.contractID)
-        {
-          return;
-        }
-
-        // Our category entry was removed, make sure to add it back
-        let catMan = Utils.categoryManager;
-        catMan.addCategoryEntry(category, this.contractID, this.contractID, false, true);
-        break;
-      }
-    }
-  },
-
-  //
-  // nsIChannelEventSink interface implementation
-  //
-
-  asyncOnChannelRedirect: function(oldChannel, newChannel, flags, callback)
-  {
-    let result = Cr.NS_OK;
-    try
-    {
-      // Try to retrieve previously stored request data from the channel
-      let contentType;
-      if (oldChannel instanceof Ci.nsIWritablePropertyBag)
-      {
-        try
-        {
-          contentType = oldChannel.getProperty("abpRequestType");
-        }
-        catch(e)
-        {
-          // No data attached, ignore this redirect
-          return;
-        }
-      }
-
-      let newLocation = null;
-      try
-      {
-        newLocation = newChannel.URI;
-      } catch(e2) {}
-      if (!newLocation)
-        return;
-
-      let wnd = Utils.getRequestWindow(newChannel);
-      if (!wnd)
-        return;
-
-      if (contentType == Policy.type.SUBDOCUMENT && wnd.parent == wnd.top && wnd.opener)
-      {
-        // This is a window opened in a new tab miscategorized as frame load,
-        // see bug 467514. Get the frame as context to be at least consistent.
-        wnd = wnd.opener;
-      }
-
-      if (contentType == Policy.type.POPUP && wnd.opener)
-      {
-        // Popups are initiated by their opener, not their own window.
-        wnd = wnd.opener;
-      }
-
-      if (!Policy.processNode(wnd, wnd.document, contentType, newLocation, false))
-        result = Cr.NS_BINDING_ABORTED;
-    }
-    catch (e)
-    {
-      // We shouldn't throw exceptions here - this will prevent the redirect.
-      Cu.reportError(e);
-    }
-    finally
-    {
-      callback.onRedirectVerifyCallback(result);
-    }
-  },
-
-  //
-  // nsIFactory interface implementation
-  //
-
-  createInstance: function(outer, iid)
-  {
-    if (outer)
-      throw Cr.NS_ERROR_NO_AGGREGATION;
-    return this.QueryInterface(iid);
-  }
-};
-PolicyImplementation.init();
-
-/**
- * Nodes scheduled for post-processing (might be null).
- * @type Array of Node
- */
-let scheduledNodes = null;
-
-/**
- * Schedules a node for post-processing.
- */
-function schedulePostProcess(/**Element*/ node)
-{
-  if (scheduledNodes)
-    scheduledNodes.push(node);
-  else
-  {
-    scheduledNodes = [node];
-    Utils.runAsync(postProcessNodes);
-  }
-}
-
-/**
- * Processes nodes scheduled for post-processing (typically hides them).
- */
-function postProcessNodes()
-{
-  let nodes = scheduledNodes;
-  scheduledNodes = null;
-
-  for each (let node in nodes)
-  {
-    // adjust frameset's cols/rows for frames
-    let parentNode = node.parentNode;
-    if (parentNode && parentNode instanceof Ci.nsIDOMHTMLFrameSetElement)
-    {
-      let hasCols = (parentNode.cols && parentNode.cols.indexOf(",") > 0);
-      let hasRows = (parentNode.rows && parentNode.rows.indexOf(",") > 0);
-      if ((hasCols || hasRows) && !(hasCols && hasRows))
-      {
-        let index = -1;
-        for (let frame = node; frame; frame = frame.previousSibling)
-          if (frame instanceof Ci.nsIDOMHTMLFrameElement || frame instanceof Ci.nsIDOMHTMLFrameSetElement)
-            index++;
-
-        let property = (hasCols ? "cols" : "rows");
-        let weights = parentNode[property].split(",");
-        weights[index] = "0";
-        parentNode[property] = weights.join(",");
-      }
-    }
-    else
-      node.classList.add(collapsedClass);
-  }
-}
 
 /**
  * Extracts the hostname from a URL (might return null).
@@ -655,6 +301,36 @@ function getHostname(/**String*/ url) /**String*/
   {
     return null;
   }
+}
+
+/**
+ * Retrieves and validates the sitekey for a frame structure.
+ */
+function getSitekey(frames)
+{
+  for (let frame of frames)
+  {
+    if (frame.sitekey && frame.sitekey.indexOf("_") >= 0)
+    {
+      let [key, signature] = frame.sitekey.split("_", 2);
+      key = key.replace(/=/g, "");
+
+      // Website specifies a key but is the signature valid?
+      let uri = Services.io.newURI(frame.location, null, null);
+      let host = uri.asciiHost;
+      if (uri.port > 0)
+        host += ":" + uri.port;
+      let params = [
+        uri.path.replace(/#.*/, ""),  // REQUEST_URI
+        host,                         // HTTP_HOST
+        Utils.httpProtocol.userAgent  // HTTP_USER_AGENT
+      ];
+      if (Utils.verifySignature(key, signature, params.join("\0")))
+        return [key, frame];
+    }
+  }
+
+  return [null, null];
 }
 
 /**
@@ -702,14 +378,15 @@ function getWindowLocation(wnd)
 /**
  * Checks whether the location's origin is different from document's origin.
  */
-function isThirdParty(/**nsIURI*/location, /**String*/ docDomain) /**Boolean*/
+function isThirdParty(/**String*/location, /**String*/ docDomain) /**Boolean*/
 {
   if (!location || !docDomain)
     return true;
 
+  let uri = Utils.makeURI(location);
   try
   {
-    return Utils.effectiveTLD.getBaseDomain(location) != Utils.effectiveTLD.getBaseDomainFromHost(docDomain);
+    return Utils.effectiveTLD.getBaseDomain(uri) != Utils.effectiveTLD.getBaseDomainFromHost(docDomain);
   }
   catch (e)
   {
@@ -717,25 +394,8 @@ function isThirdParty(/**nsIURI*/location, /**String*/ docDomain) /**Boolean*/
     let host = "";
     try
     {
-      host = location.host;
+      host = uri.host;
     } catch (e) {}
     return host != docDomain;
   }
-}
-
-/**
- * Re-checks filters on an element.
- */
-function refilterNode(/**Node*/ node, /**RequestEntry*/ entry)
-{
-  let wnd = Utils.getWindow(node);
-  if (!wnd || wnd.closed)
-    return;
-
-  if (entry.type == Policy.type.OBJECT)
-  {
-    node.removeEventListener("mouseover", objectMouseEventHander, true);
-    node.removeEventListener("mouseout", objectMouseEventHander, true);
-  }
-  Policy.processNode(wnd, node, entry.type, Utils.makeURI(entry.location), true);
 }

@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+
+<!--
+  - This Source Code Form is subject to the terms of the Mozilla Public
+  - License, v. 2.0. If a copy of the MPL was not distributed with this
+  - file, You can obtain one at http://mozilla.org/MPL/2.0/.
+  -->
+
+<!DOCTYPE vbox SYSTEM "chrome://adblockplus/locale/overlay.dtd">
+
+<window
+    xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+    width="1"
+    height="1"
+    onload="window.close();">   <!-- Close window if it gets opened directly for some reason -->
+  <setting type="control">
+    <button id="adblockplus-filters" label="&filters.label;…"/>
+  </setting>
+  <setting pref="extensions.adblockplus.enabled" type="bool" inverted="true" title="&disable.label;"/>
+  <setting pref="extensions.adblockplus.frameobjects" type="bool" title="&objecttabs.label;"/>
+  <setting id="adblockplus-savestats" type="bool" title="&counthits.label;"/>
+  <setting id="adblockplus-sync" type="bool" title="&sync.label;"/>
+  <setting id="adblockplus-shownotifications" type="bool" title="&shownotifications.label;"/>
+  <setting id="adblockplus-showintoolbar" type="bool" title="&showintoolbar.label;"/>
+  <setting id="adblockplus-showinstatusbar" pref="extensions.adblockplus.showinstatusbar" type="bool" title="&showinstatusbar.label;"/>
+</window>

@@ -9,7 +9,7 @@
 
   <Description about="urn:mozilla:install-manifest">
     <em:id>adblocklatitude@addons.palemoon.org</em:id>
-    <em:version>4.0.1</em:version>
+    <em:version>5.0.0b1</em:version>
     <em:name>Adblock Latitude</em:name>
     <em:description>Acceptable ads are yesterday!</em:description>
     <em:creator>Pale Moon Add-ons Team</em:creator>
@@ -22,8 +22,8 @@
       <Description>
         <!-- Pale Moon -->
         <em:id>{8de7fcbb-c55c-4fbe-bfc5-fc555c87dbc4}</em:id>
-        <em:minVersion>25.0</em:minVersion>
-        <em:maxVersion>27.*</em:maxVersion>
+        <em:minVersion>27.0</em:minVersion>
+        <em:maxVersion>28.*</em:maxVersion>
       </Description>
     </em:targetApplication>
   </Description>

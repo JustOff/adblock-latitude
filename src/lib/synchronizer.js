@@ -1,8 +1,6 @@
-/*
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at http://mozilla.org/MPL/2.0/.
-*/
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
  * @fileOverview Manages synchronization of filter subscriptions.
@@ -11,40 +9,37 @@
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-let {TimeLine} = require("timeline");
-let {Downloader, Downloadable,
+var {Downloader, Downloadable,
     MILLIS_IN_SECOND, MILLIS_IN_MINUTE, MILLIS_IN_HOUR, MILLIS_IN_DAY} = require("downloader");
-let {Filter, CommentFilter} = require("filterClasses");
-let {FilterStorage} = require("filterStorage");
-let {FilterNotifier} = require("filterNotifier");
-let {Prefs} = require("prefs");
-let {Subscription, DownloadableSubscription} = require("subscriptionClasses");
-let {Utils} = require("utils");
+var {Filter, CommentFilter} = require("filterClasses");
+var {FilterStorage} = require("filterStorage");
+var {FilterNotifier} = require("filterNotifier");
+var {Prefs} = require("prefs");
+var {Subscription, DownloadableSubscription} = require("subscriptionClasses");
+var {Utils} = require("utils");
 
-let INITIAL_DELAY = 6 * MILLIS_IN_MINUTE;
-let CHECK_INTERVAL = 1 * MILLIS_IN_HOUR;
-let DEFAULT_EXPIRATION_INTERVAL = 5 * MILLIS_IN_DAY;
+var INITIAL_DELAY = 1 * MILLIS_IN_MINUTE;
+var CHECK_INTERVAL = 1 * MILLIS_IN_HOUR;
+var DEFAULT_EXPIRATION_INTERVAL = 5 * MILLIS_IN_DAY;
 
 /**
  * The object providing actual downloading functionality.
  * @type Downloader
  */
-let downloader = null;
+var downloader = null;
 
 /**
  * This object is responsible for downloading filter subscriptions whenever
  * necessary.
  * @class
  */
-let Synchronizer = exports.Synchronizer =
+var Synchronizer = exports.Synchronizer =
 {
   /**
    * Called on module startup.
    */
   init: function()
   {
-    TimeLine.enter("Entered Synchronizer.init()");
-
     downloader = new Downloader(this._getDownloadables.bind(this), INITIAL_DELAY, CHECK_INTERVAL);
     onShutdown.add(function()
     {
@@ -55,8 +50,6 @@ let Synchronizer = exports.Synchronizer =
     downloader.onDownloadStarted = this._onDownloadStarted.bind(this);
     downloader.onDownloadSuccess = this._onDownloadSuccess.bind(this);
     downloader.onDownloadError = this._onDownloadError.bind(this);
-
-    TimeLine.leave("Synchronizer.init() done");
   },
 
   /**
@@ -82,12 +75,12 @@ let Synchronizer = exports.Synchronizer =
   /**
    * Yields Downloadable instances for all subscriptions that can be downloaded.
    */
-  _getDownloadables: function()
+  _getDownloadables: function*()
   {
     if (!Prefs.subscriptions_autoupdate)
       return;
 
-    for each (let subscription in FilterStorage.subscriptions)
+    for (let subscription of FilterStorage.subscriptions)
     {
       if (subscription instanceof DownloadableSubscription)
         yield this._getDownloadable(subscription, false);
@@ -107,6 +100,7 @@ let Synchronizer = exports.Synchronizer =
     result.softExpiration = subscription.softExpiration * MILLIS_IN_SECOND;
     result.hardExpiration = subscription.expires * MILLIS_IN_SECOND;
     result.manual = manual;
+    result.downloadCount = subscription.downloadCount;
     return result;
   },
 
@@ -121,7 +115,7 @@ let Synchronizer = exports.Synchronizer =
   _onDownloadStarted: function(downloadable)
   {
     let subscription = Subscription.fromURL(downloadable.url);
-    FilterNotifier.triggerListeners("subscription.downloadStatus", subscription);
+    FilterNotifier.triggerListeners("subscription.downloading", subscription);
   },
 
   _onDownloadSuccess: function(downloadable, responseText, errorCallback, redirectCallback)
@@ -189,6 +183,7 @@ let Synchronizer = exports.Synchronizer =
     // The download actually succeeded
     subscription.lastSuccess = subscription.lastDownload = Math.round(Date.now() / MILLIS_IN_SECOND);
     subscription.downloadStatus = "synchronize_ok";
+    subscription.downloadCount = downloadable.downloadCount;
     subscription.errors = 0;
 
     // Remove lines containing parameters
@@ -198,9 +193,18 @@ let Synchronizer = exports.Synchronizer =
     // Process parameters
     if (params.homepage)
     {
-      let uri = Utils.makeURI(params.homepage);
-      if (uri && (uri.scheme == "http" || uri.scheme == "https"))
-        subscription.homepage = uri.spec;
+      let url;
+      try
+      {
+        url = new URL(params.homepage);
+      }
+      catch (e)
+      {
+        url = null;
+      }
+
+      if (url && (url.protocol == "http:" || url.protocol == "https:"))
+        subscription.homepage = url.href;
     }
 
     if (params.title)
@@ -231,20 +235,15 @@ let Synchronizer = exports.Synchronizer =
     subscription.softExpiration = Math.round(softExpiration / MILLIS_IN_SECOND);
     subscription.expires = Math.round(hardExpiration / MILLIS_IN_SECOND);
 
-    delete subscription.requiredVersion;
-    delete subscription.upgradeRequired;
     if (minVersion)
-    {
-      let {addonVersion} = require("info");
       subscription.requiredVersion = minVersion;
-      if (Services.vc.compare(minVersion, addonVersion) > 0)
-        subscription.upgradeRequired = true;
-    }
+    else
+      delete subscription.requiredVersion;
 
     // Process filters
     lines.shift();
     let filters = [];
-    for each (let line in lines)
+    for (let line of lines)
     {
       line = Filter.normalize(line);
       if (line)
@@ -300,7 +299,7 @@ let Synchronizer = exports.Synchronizer =
             redirectCallback(match[2]);
           else if (match && match[1] == "410")        // Gone
           {
-            let data = "[Adblock]\n" + subscription.filters.map(function(f) f.text).join("\n");
+            let data = "[Adblock]\n" + subscription.filters.map((f) => f.text).join("\n");
             redirectCallback("data:text/plain," + encodeURIComponent(data));
           }
         }, false);

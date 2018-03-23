@@ -1,8 +1,6 @@
-/*
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at http://mozilla.org/MPL/2.0/.
-*/
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
  * @fileOverview Starts up Adblock Plus
@@ -11,24 +9,35 @@
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-let {TimeLine} = require("timeline");
-
-TimeLine.enter("Adblock Plus startup");
+bootstrapChildProcesses();
 registerPublicAPI();
-TimeLine.log("Done registering public API");
 require("filterListener");
-TimeLine.log("Done loading filter listener");
 require("contentPolicy");
-TimeLine.log("Done loading content policy");
 require("synchronizer");
-TimeLine.log("Done loading subscription synchronizer");
 require("notification");
-TimeLine.log("Done loading notification downloader");
-/* require("sync");
-TimeLine.log("Done loading sync support"); */
+require("sync");
+require("messageResponder");
 require("ui");
-TimeLine.log("Done loading UI integration code");
-TimeLine.leave("Started up");
+require("objectTabs");
+require("elemHideFF");
+require("cssProperties");
+
+function bootstrapChildProcesses()
+{
+  let info = require("info");
+
+  let processScript = info.addonRoot + "lib/child/bootstrap.js?" +
+      Math.random() + "&info=" + encodeURIComponent(JSON.stringify(info));
+  let messageManager = Cc["@mozilla.org/parentprocessmessagemanager;1"]
+                         .getService(Ci.nsIProcessScriptLoader)
+                         .QueryInterface(Ci.nsIMessageBroadcaster);
+  messageManager.loadProcessScript(processScript, true);
+
+  onShutdown.add(() => {
+    messageManager.broadcastAsyncMessage("AdblockPlus:Shutdown", processScript);
+    messageManager.removeDelayedProcessScript(processScript);
+  });
+}
 
 function registerPublicAPI()
 {
