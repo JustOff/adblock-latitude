@@ -203,6 +203,7 @@ let {application} = require("info");
 switch (application)
 {
   case "firefox":
+  case "palemoon":
   {
     exports.isKnownWindow = function ff_isKnownWindow(window)
     {
