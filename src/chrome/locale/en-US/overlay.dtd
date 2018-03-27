@@ -13,7 +13,6 @@
 
 <!ENTITY sidebar.title          "Blockable items on current page">
 
-<!ENTITY sendReport.label       "&amp;Report issue on this page">
 <!ENTITY filters.label          "&amp;Filter preferences">
 <!ENTITY opensidebar.label      "Open &amp;blockable items">
 <!-- Note: This access key should usually be the same as closesidebar.accesskey. It is the same menu item with different label depending on whether the sidebar is currently open.-->
