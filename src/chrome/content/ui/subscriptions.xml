@@ -39,7 +39,7 @@
                 author="Zpacman"/>
   <subscription title="Peter Lowe's list"
                 specialization="English"
-                url="http://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&mimetype=plaintext"
+                url="http://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&amp;mimetype=plaintext"
                 homepage="http://pgl.yoyo.org/adservers/"
                 prefixes="en"
                 author="Peter Lowe"/>
