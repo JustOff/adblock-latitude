@@ -121,14 +121,6 @@ let optionsObserver =
         this.value = (Prefs.notifications_ignoredcategories.indexOf("*") == -1);
       });
 
-      let hasAcceptableAds = FilterStorage.subscriptions.some((subscription) => subscription instanceof DownloadableSubscription &&
-        subscription.url == Prefs.subscriptions_exceptionsurl);
-      setChecked("adblockplus-acceptableAds", hasAcceptableAds);
-      addCommandHandler("adblockplus-acceptableAds", function()
-      {
-        this.value = UI.toggleAcceptableAds();
-      });
-
       setChecked("adblockplus-sync", syncEngine && syncEngine.enabled);
       addCommandHandler("adblockplus-sync", function()
       {
@@ -789,21 +781,6 @@ let UI = exports.UI =
    */
   addSubscription: function(/**Window*/ window, /**String*/ prevVersion)
   {
-    // Add "acceptable ads" subscription for new users and user updating from old ABP versions.
-    // Don't add it for users of privacy subscriptions (use a hardcoded list for now).
-    let addAcceptable = (Services.vc.compare(prevVersion, "2.0") < 0);
-    let privacySubscriptions = {
-      "https://easylist-downloads.adblockplus.org/easyprivacy+easylist.txt": true,
-      "https://easylist-downloads.adblockplus.org/easyprivacy.txt": true,
-      "https://secure.fanboy.co.nz/fanboy-tracking.txt": true,
-      "https://fanboy-adblock-list.googlecode.com/hg/fanboy-adblocklist-stats.txt": true,
-      "https://bitbucket.org/fanboy/fanboyadblock/raw/tip/fanboy-adblocklist-stats.txt": true,
-      "https://hg01.codeplex.com/fanboyadblock/raw-file/tip/fanboy-adblocklist-stats.txt": true,
-      "https://adversity.googlecode.com/hg/Adversity-Tracking.txt": true
-    };
-    if (FilterStorage.subscriptions.some((subscription) => subscription.url == Prefs.subscriptions_exceptionsurl || subscription.url in privacySubscriptions))
-      addAcceptable = false;
-
     // Don't add subscription if the user has a subscription already
     let addSubscription = true;
     if (FilterStorage.subscriptions.some((subscription) => subscription instanceof DownloadableSubscription && subscription.url != Prefs.subscriptions_exceptionsurl))
@@ -814,21 +791,6 @@ let UI = exports.UI =
     {
       if (FilterStorage.subscriptions.some((subscription) => subscription.url != Prefs.subscriptions_exceptionsurl && subscription.filters.length))
         addSubscription = false;
-    }
-
-    // Add "acceptable ads" subscription
-    if (addAcceptable)
-    {
-      let subscription = Subscription.fromURL(Prefs.subscriptions_exceptionsurl);
-      if (subscription)
-      {
-        subscription.title = "Allow non-intrusive advertising";
-        FilterStorage.addSubscription(subscription);
-        if (subscription instanceof DownloadableSubscription && !subscription.lastDownload)
-          Synchronizer.execute(subscription);
-      }
-      else
-        addAcceptable = false;
     }
 
     // Add "anti-adblock messages" subscription for new users and users updating from old ABP versions
@@ -844,7 +806,7 @@ let UI = exports.UI =
       }
     }
 
-    if (!addSubscription && !addAcceptable)
+    if (!addSubscription)
       return;
 
     function notifyUser()
@@ -1189,30 +1151,6 @@ let UI = exports.UI =
     FilterStorage.addSubscription(subscription);
     if (subscription instanceof DownloadableSubscription && !subscription.lastDownload)
       Synchronizer.execute(subscription);
-  },
-
-  /**
-   * Adds or removes "non-intrisive ads" filter list.
-   * @return {Boolean} true if the filter list has been added
-   **/
-  toggleAcceptableAds: function()
-  {
-    let subscription = Subscription.fromURL(Prefs.subscriptions_exceptionsurl);
-    if (!subscription)
-      return false;
-
-    subscription.disabled = false;
-    subscription.title = "Allow non-intrusive advertising";
-    if (subscription.url in FilterStorage.knownSubscriptions)
-      FilterStorage.removeSubscription(subscription);
-    else
-    {
-      FilterStorage.addSubscription(subscription);
-      if (subscription instanceof DownloadableSubscription && !subscription.lastDownload)
-        Synchronizer.execute(subscription);
-    }
-
-    return (subscription.url in FilterStorage.knownSubscriptions);
   },
 
   /**
