@@ -35,11 +35,6 @@
       setLinks("acceptable-ads-explanation", link, openFilters);
     });
 
-    getDocLink("contribute", function(link)
-    {
-      setLinks("share-headline", link);
-    });
-
     ext.backgroundPage.sendMessage({
       type: "app.get",
       what: "issues"

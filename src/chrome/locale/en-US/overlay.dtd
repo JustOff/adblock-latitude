@@ -23,7 +23,6 @@
 <!ENTITY whitelist.page.label   "Disable on this page only">
 <!ENTITY disable.label          "Disable everywhere">
 <!ENTITY options.label          "&amp;Options">
-<!ENTITY contribute.label       "Contribute to Adblock Latitude">
 
 <!ENTITY showintoolbar.label        "Show in tool&amp;bar">
 <!ENTITY showinstatusbar.label      "&amp;Show in status bar">
