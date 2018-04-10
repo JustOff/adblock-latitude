@@ -768,14 +768,6 @@ let UI = exports.UI =
   },
 
   /**
-   * Opens our contribution page.
-   */
-  openContributePage: function(/**Window*/ window)
-  {
-    this.loadDocLink("contribute", window);
-  },
-
-  /**
    * Executed on first run, adds a filter subscription and notifies that user
    * about that.
    */
@@ -1504,8 +1496,6 @@ let UI = exports.UI =
           item.removeAttribute("acceltext");
       }
     }
-
-    hideElement(prefix + "contributebutton", Prefs.hideContributeButton);
   },
 
   /**
@@ -1699,21 +1689,6 @@ let UI = exports.UI =
     }
   },
 
-  /**
-   * Hide contribute button and persist this choice.
-   */
-  hideContributeButton: function(/**Window*/ window)
-  {
-    Prefs.hideContributeButton = true;
-
-    for (let id of ["abp-status-contributebutton", "abp-toolbar-contributebutton", "abp-menuitem-contributebutton"])
-    {
-      let button = window.document.getElementById(id);
-      if (button)
-        button.hidden = true;
-    }
-  },
-
   _showNotification: function(window, button, notification)
   {
     let panel = window.document.getElementById("abp-notification");
@@ -1809,8 +1784,6 @@ let eventHandlers = [
   ["abp-command-toggleshowintoolbar", "command", UI.toggleToolbarIcon.bind(UI)],
   ["abp-command-toggleshowinstatusbar", "command", UI.togglePref.bind(UI, "showinstatusbar")],
   ["abp-command-enable", "command", UI.togglePref.bind(UI, "enabled")],
-  ["abp-command-contribute", "command", UI.openContributePage.bind(UI)],
-  ["abp-command-contribute-hide", "command", UI.hideContributeButton.bind(UI)],
   ["abp-command-toggleshownotifications", "command", Notification.toggleIgnoreCategory.bind(Notification, "*", null)]
 ];
 

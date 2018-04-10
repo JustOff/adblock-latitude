@@ -245,39 +245,6 @@ toolbar[mode="full"] #abp-toolbarbutton[type="menu"]
   -moz-image-region: rect(0px, 42px, 14px, 28px);
 }
 
-.abp-contributebutton
-{
-  margin-top: 20px;
-}
-
-.abp-contributebutton-btn
-{
-  font: -moz-info;
-  margin-left: 40px;
-  margin-right: 40px;
-}
-
-.abp-contributebutton-close
-{
-  border-style: none !important;
-  -moz-user-focus: normal;
-  list-style-image: url("close.png");
-  -moz-appearance: none;
-  -moz-image-region: rect(0px, 14px, 14px, 0px);
-
-  /* Firefox Australis theme defines some width for all toolbaritem tags inside
-   * UIPanel element, the properties have to be reset to default values. */
-  min-width: 0px !important;
-  min-height: 0px !important;
-  width: auto !important;
-  height: auto !important;
-}
-
-.abp-contributebutton-close:hover
-{
-  -moz-image-region: rect(0px, 28px, 14px, 14px);
-}
-
 #abp-notification
 {
   width: 300px;
