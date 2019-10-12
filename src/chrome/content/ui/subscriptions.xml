@@ -7,18 +7,18 @@
   -->
 
 <subscriptions>
-  <subscription title="EasyList"
+  <subscription title="Lunar Blocklist"
                 specialization="English"
-                url="https://easylist.to/easylist/easylist.txt"
-                homepage="https://easylist.to/"
+                url="https://blocklist.palemoon.org/ABL/lunar-blocklist.txt"
+                homepage="https://github.com/wolfbeast/lunarblocklist"
                 prefixes="en"
-                author="EasyList"/>
-  <subscription title="EasyPrivacy"
+                author="Moonchild"/>
+  <subscription title="Peter Lowe's list"
                 specialization="English"
-                url="https://easylist.to/easylist/easyprivacy.txt"
-                homepage="https://easylist.to/"
+                url="http://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&amp;mimetype=plaintext"
+                homepage="http://pgl.yoyo.org/adservers/"
                 prefixes="en"
-                author="EasyList"/>
+                author="Peter Lowe"/>
   <subscription title="Fanboy&#39;s Annoyance List"
                 specialization="English"
                 url="https://easylist.to/easylist/fanboy-annoyance.txt"
@@ -31,16 +31,4 @@
                 homepage="https://easylist.to/"
                 prefixes="en"
                 author="Fanboy"/>
-  <subscription title="Blockzilla (ads and tracking protection)"
-                specialization="English"
-                url="https://raw.githubusercontent.com/zpacman/Blockzilla/master/Blockzilla.txt"
-                homepage="https://blockzilla.jimdo.com"
-                prefixes="en"
-                author="Zpacman"/>
-  <subscription title="Peter Lowe's list"
-                specialization="English"
-                url="http://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&amp;mimetype=plaintext"
-                homepage="http://pgl.yoyo.org/adservers/"
-                prefixes="en"
-                author="Peter Lowe"/>
 </subscriptions>
