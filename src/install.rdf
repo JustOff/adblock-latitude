@@ -9,7 +9,7 @@
 
   <Description about="urn:mozilla:install-manifest">
     <em:id>adblocklatitude@addons.palemoon.org</em:id>
-    <em:version>5.0.3</em:version>
+    <em:version>5.0.4</em:version>
     <em:name>Adblock Latitude</em:name>
     <em:description>Acceptable ads are yesterday!</em:description>
     <em:creator>Pale Moon Add-ons Team</em:creator>
