@@ -93,19 +93,11 @@ function restoreWidget(/**Element*/ toolbox, /**Widget*/ widget)
 
 function showWidget(/**Element*/ toolbox, /**Widget*/ widget, /**String*/ position)
 {
-  let visible = "visible", parent = null, before = null, special = null;
+  let visible = "visible", parent = null, before = null;
   if (position)
   {
     [visible, parent, before] = position.split(",", 3);
     parent = toolbox.ownerDocument.getElementById(parent);
-    // Handle special items with dynamic ids
-    special = /^(separator|spacer|spring)\[(\d+)\]$/.exec(before);
-    if (special !== null) {
-      let dynItems = parent.querySelectorAll("toolbar" + special[1]);
-      if (special[2] < dynItems.length) {
-        before = dynItems[special[2]].id;
-      }
-    }
     if (before == "")
       before = null;
     else
@@ -141,8 +133,7 @@ function showWidget(/**Element*/ toolbox, /**Widget*/ widget, /**String*/ positi
   {
     // Add the item to the toolbar
     let items = parent.currentSet.split(",");
-    let beforeId = (special ? special[1] : before.id);
-    let index = (before ? items.indexOf(beforeId) : -1);
+    let index = (before ? items.indexOf(before.id) : -1);
     if (index < 0)
       before = null;
     parent.insertItem(widget.id, before, null, false);
@@ -184,19 +175,7 @@ function saveState(/**Element*/ toolbox, /**Widget*/ widget)
       widget.onAdded(node)
 
     let toolbar = getToolbar(node);
-    // Handle special items with dynamic ids
-    let nextSiblingId = node.nextSibling && node.nextSibling.id;
-    let special = /^(separator|spacer|spring)\d+$/.exec(nextSiblingId);
-    if (special !== null) {
-      let dynItems = node.nextSibling.parentNode.querySelectorAll("toolbar" + special[1]);
-      for (let i = 0; i < dynItems.length; i++) {
-        if (dynItems[i].id == nextSiblingId) {
-          nextSiblingId = special[1] + "[" + i + "]";
-          break;
-        }
-      }
-    }
-    position = "visible," + toolbar.id + "," + (node.nextSibling ? nextSiblingId : "");
+    position = "visible," + toolbar.id + "," + (node.nextSibling ? node.nextSibling.id : "");
   }
   else
     position = position.replace(/^visible,/, "hidden,")
