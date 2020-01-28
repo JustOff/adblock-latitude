@@ -9,7 +9,7 @@ let {XPCOMUtils} = Cu.import("resource://gre/modules/XPCOMUtils.jsm", {});
 
 let {Utils} = require("utils");
 let {RequestNotifier} = require("child/requestNotifier");
-let {storeNodes} = require("child/contentPolicy");
+let {storeNodes, shouldAllow} = require("child/contentPolicy");
 
 /**
  * Determines the context menu entries to be shown for a contextmenu event.
@@ -46,6 +46,11 @@ function getContextInfo(event)
 
   // Look up data that we have for the node
   let data = RequestNotifier.getDataForNode(target);
+  if (data === null && target instanceof Ci.nsIImageLoadingContent)
+  {
+    shouldAllow(target.ownerDocument.defaultView, target, "IMAGE", target.src);
+    data = RequestNotifier.getDataForNode(target);
+  }
   let hadImage = false;
   if (data && !data[1].filter)
   {
