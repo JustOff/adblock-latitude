@@ -2,12 +2,6 @@ Adblock Latitude
 ================
 This repository contains the code for the Pale Moon Ad-blocking extension.
 
-Branches
-================
-* TRUNK - This branch contains the current generation ABL code.
-* TOOLKIT - This branch contains the once purposed next generation ABL code. It is not in use anymore
-* N.n_RELBRANCH - These branches are used for release code.
-
 Building
 ================
 Building ABL your self requires zip on unix and if on Windows the Mozilla-Build tools.
